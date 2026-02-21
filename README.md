@@ -6,7 +6,7 @@ A simple tool to automatically download your sleep data from Viatom/Wellue serve
 - **Automatic Downloads**: No need to manually export files from your phone or PC app.
 - **Smart Merging**: Automatically combines long sleep sessions that the device might have split into multiple files.
 - **Note & Label Sync**: Syncs your "Remarks" (notes) and "Stars" (flags) from the Viatom cloud directly into the filenames.
-- **OSCAR Ready**: Can automatically generate CSV files that OSCAR can read instantly.
+- **OSCAR Ready**: Downloads the raw `.dat` / `.bin` files that OSCAR uses for high-resolution 1-second data.
 - **Clean Data**: Automatically ignores very short sessions (like brief tests or accidental starts).
 
 ---
@@ -14,25 +14,34 @@ A simple tool to automatically download your sleep data from Viatom/Wellue serve
 ## 🚀 Quick Start (Windows)
 
 ### 1. Install `uv` (The Easy Way)
-`uv` is a modern tool that handles Python and dependencies for you. You don't need to manually install Python!
+`uv` handles Python and dependencies for you.
 
-1. Open **PowerShell** (Click Start, type `PowerShell`, and press Enter).
-2. Copy and paste this command, then press Enter:
+#### **Windows**
+1. Open **PowerShell**.
+2. Run:
    ```powershell
    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
    ```
-3. Close and reopen PowerShell to finish the setup.
+
+#### **Linux / macOS**
+1. Open your **Terminal**.
+2. Run:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+*Close and reopen your terminal to finish the setup.*
 
 ### 2. Set Up the Project
 The best way to get the project and keep it updated is using **Git**:
 
-1. In PowerShell, navigate to where you want the project (e.g., `cd C:\`).
+1. In your terminal, navigate to where you want the project.
 2. Run:
-   ```powershell
+   ```bash
    git clone https://github.com/AJolly/O2RingCloudDownloader
    cd O2RingCloudDownloader
    ```
-*(If you don't have Git, you can also just download and extract the ZIP file from GitHub, but Git makes updates much easier!)*
+*(If you don't have Git, just download the ZIP from GitHub and extract it.)*
 
 3. In your folder, find `o2_config.sample.ini`.
 4. Copy (or rename) it to `o2_config.ini`.
@@ -62,8 +71,8 @@ Open `o2_config.ini` in Notepad to customize how the tool works:
 
 ### The `data` Folder
 All your downloaded files go here. 
-- `.bin` or `.dat` files are the raw data.
-- `.csv` files are the ones you import into OSCAR.
+- **`.bin` / `.dat` files**: These are the raw files you import into **OSCAR**.
+- **`.csv` files**: These are optional high-resolution exports for other analysis (Excel, Python, etc.).
 
 ### Ignoring Sessions
 If there's a specific session you never want to see again, you can add its ID or its timestamp (the numbers at the start of the filename) to a file named `ignored_sessions.txt` in the main folder.
