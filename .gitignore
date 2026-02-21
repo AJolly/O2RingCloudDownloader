@@ -1,0 +1,10 @@
+reverse_engineering/
+DataDirFromOfficialProgram/
+o2_config.ini
+o2_config.json
+ignored_sessions.txt
+data/
+__pycache__/
+.env
+*.dat
+*.csv

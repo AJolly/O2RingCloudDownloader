@@ -1,0 +1,10 @@
+[project]
+name = "o2downloader"
+version = "0.1.0"
+description = "Viatom/Wellue O2Ring Data Downloader"
+dependencies = [
+    "requests",
+]
+
+[tool.uv]
+package = false
