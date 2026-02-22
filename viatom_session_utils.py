@@ -14,8 +14,13 @@ _FILENAME_TS_RE = re.compile(r'(\d{14})')
 _FILENAME_TS_RE2 = re.compile(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$')
 _FILENAME_PURE_DIGITS = re.compile(r'^(\d{14})$')
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def get_config(config_path="o2_config.ini"):
     """Reads the shared configuration file and returns a dict of Settings."""
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(SCRIPT_DIR, config_path)
+        
     config_parser = configparser.ConfigParser()
     settings = {
         'email': None,
@@ -26,9 +31,10 @@ def get_config(config_path="o2_config.ini"):
         'launch_after': ''
     }
     
-    if not os.path.exists(config_path) and os.path.exists('o2_config.sample.ini'):
+    sample_config_path = os.path.join(SCRIPT_DIR, 'o2_config.sample.ini')
+    if not os.path.exists(config_path) and os.path.exists(sample_config_path):
         try:
-            config_parser.read('o2_config.sample.ini', encoding='utf-8')
+            config_parser.read(sample_config_path, encoding='utf-8')
         except Exception:
             pass
             

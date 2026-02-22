@@ -231,6 +231,8 @@ def main():
 
     # Load local config
     config_path = args.config
+    if not os.path.isabs(config_path):
+        config_path = os.path.join(SCRIPT_DIR, config_path)
     config_parser = configparser.ConfigParser()
     
     email = None
@@ -241,9 +243,10 @@ def main():
     launch_after = ""
     
     # Try to load defaults from sample if this is a brand new run
-    if not os.path.exists(config_path) and os.path.exists('o2_config.sample.ini'):
+    sample_config_path = os.path.join(SCRIPT_DIR, 'o2_config.sample.ini')
+    if not os.path.exists(config_path) and os.path.exists(sample_config_path):
         try:
-            config_parser.read('o2_config.sample.ini', encoding='utf-8')
+            config_parser.read(sample_config_path, encoding='utf-8')
             if 'Settings' in config_parser:
                 # Remove dummy credentials so we don't try to log in with them
                 if config_parser['Settings'].get('email') == 'your_email@example.com':
@@ -274,6 +277,9 @@ def main():
         output_dir = args.output_dir
     if args.csv is not None:
         should_generate_csv = args.csv
+        
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.join(SCRIPT_DIR, output_dir)
 
     client = ViatomClient(secret=SECRET)
     login_success = False
