@@ -8,6 +8,7 @@ A simple tool to automatically download your sleep data from Viatom/Wellue serve
 - **Note & Label Sync**: Syncs your "Remarks" (notes) and "Stars" (flags) from the Viatom cloud directly into the filenames.
 - **OSCAR Ready**: Downloads the raw `.dat` / `.bin` files that OSCAR uses for high-resolution 1-second data.
 - **Clean Data**: Automatically ignores very short sessions (like brief tests or accidental starts).
+- **HR Spike Analysis**: Automatically analyzes your heart rate data for micro-arousals (spikes) and generates a detailed, interactive HTML report with visually rich charts.
 
 ---
 
@@ -61,9 +62,16 @@ Open `o2_config.ini` in Notepad to customize how the tool works:
 - **`email` / `password`**: Your Viatom/Wellue account login.
 - **`output_dir`**: Where to save the files (default is a folder named `data`).
 - **`generate_csv`**: Set to `true` to create files that OSCAR can read.
+- **`run_analysis_report`**: Set to `true` to run the HR Spike detector and generate an HTML report.
 - **`skip_short_sessions_under_mins`**: Ignores sessions shorter than this (default is 60 minutes).
 - **`launch_after`**: (Optional) Put the path to OSCAR here to open it automatically after downloading.
   *Example:* `launch_after = C:\Program Files\OSCAR\OSCAR.exe`
+
+### Command Line Flags
+You can override configuration settings using command line flags:
+- `--output-dir "path"` : Specify a custom output directory.
+- `--csv` / `--no-csv` : Force enable or disable CSV generation.
+- `--analyze` / `--no-analyze` : Force enable or disable the HR Spike HTML report generation.
 
 ---
 
@@ -73,6 +81,8 @@ Open `o2_config.ini` in Notepad to customize how the tool works:
 All your downloaded files go here. 
 - **`.bin` / `.dat` files**: These are the raw files you import into **OSCAR**.
 - **`.csv` files**: These are optional high-resolution exports for other analysis (Excel, Python, etc.).
+- **`detector_results.html`**: A generated summary report of your HR Spikes if the analysis runs.
+- **`charts/`**: A subfolder inside `data` containing individual interactive JavaScript charts for every night analyzed.
 
 ### Ignoring Sessions
 If there's a specific session you never want to see again, you can add its ID or its timestamp (the numbers at the start of the filename) to a file named `ignored_sessions.txt` in the main folder.

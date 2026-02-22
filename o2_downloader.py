@@ -227,6 +227,8 @@ def main():
     parser.add_argument("--output-dir", help="Directory to save downloads", default=None)
     parser.add_argument("--csv", action="store_true", default=None, help="Generate CSV files after download")
     parser.add_argument("--no-csv", action="store_false", dest="csv", help="Do not generate CSV files")
+    parser.add_argument("--analyze", action="store_true", default=None, help="Run HR Spike analysis after download")
+    parser.add_argument("--no-analyze", action="store_false", dest="analyze", help="Do not run HR Spike analysis")
     args = parser.parse_args()
 
     # Load local config
@@ -239,6 +241,7 @@ def main():
     password = None
     output_dir = "data"
     should_generate_csv = False
+    should_run_analysis = True
     min_duration_mins = 60
     launch_after = ""
     
@@ -267,6 +270,7 @@ def main():
         password = config_parser['Settings'].get('password')
         output_dir = config_parser['Settings'].get('output_dir', 'data')
         should_generate_csv = config_parser['Settings'].getboolean('generate_csv', fallback=False)
+        should_run_analysis = config_parser['Settings'].getboolean('run_analysis_report', fallback=True)
         min_duration_mins = config_parser['Settings'].getint('skip_short_sessions_under_mins', fallback=60)
         launch_after = config_parser['Settings'].get('launch_after', fallback='')
     else:
@@ -277,6 +281,8 @@ def main():
         output_dir = args.output_dir
     if args.csv is not None:
         should_generate_csv = args.csv
+    if args.analyze is not None:
+        should_run_analysis = args.analyze
         
     if not os.path.isabs(output_dir):
         output_dir = os.path.join(SCRIPT_DIR, output_dir)
@@ -297,6 +303,7 @@ def main():
                 config_parser.set('Settings', 'password', pc_password)
                 config_parser.set('Settings', 'output_dir', output_dir)
                 config_parser.set('Settings', 'generate_csv', str(should_generate_csv).lower())
+                config_parser.set('Settings', 'run_analysis_report', str(should_run_analysis).lower())
                 config_parser.set('Settings', 'skip_short_sessions_under_mins', str(min_duration_mins))
                 config_parser.set('Settings', 'launch_after', launch_after)
                 try:
@@ -544,6 +551,19 @@ def main():
                 print(f"CSV generation failed with return code {result.returncode}")
         except Exception as e:
             print(f"Error running CSV generation: {e}")
+
+    # Generate HR spike HTML report if requested
+    if should_run_analysis:
+        print("\nTriggering HR Spike Analysis report...")
+        try:
+            cmd = [sys.executable, os.path.join(SCRIPT_DIR, "analysis", "generate_html_report.py")]
+            result = subprocess.run(cmd, capture_output=False)
+            if result.returncode == 0:
+                print("HR Spike Analysis completed successfully.")
+            else:
+                print(f"HR Spike Analysis failed with return code {result.returncode}")
+        except Exception as e:
+            print(f"Error running HR Spike Analysis: {e}")
 
     # Launch followup program if configured
     if launch_after:
