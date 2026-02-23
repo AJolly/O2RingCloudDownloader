@@ -28,6 +28,8 @@ def generate_report():
     
     for fpath in csv_files:
         fname = os.path.basename(fpath)
+        if fname == 'detector_results.csv':
+            continue
         label = KNOWN_LABELS.get(fname, fname)
         if label == fname:
             # Parse 20260217032620_326am_10h_23m.csv
@@ -251,24 +253,24 @@ def generate_report():
                 rows.forEach(row => {
                     let hrs = parseFloat(row.cells[3].dataset.sort) || 0;
                     totalHrs += hrs;
-                    
+
                     let evts = parseFloat(row.cells[12].innerText) || 0;
                     totalEvents += evts;
-                    
+
                     let pcArr = row.cells[13].innerText.split('/');
                     totalEvents10 += parseInt(pcArr[0] || 0);
                     totalEvents15 += parseInt(pcArr[1] || 0);
-                    
+
                     totalMajorA += parseInt(row.cells[17].innerText) || 0;
                     totalMajorB += parseInt(row.cells[18].innerText) || 0;
                     totalMajorC += parseInt(row.cells[19].innerText) || 0;
-                    
+
                     sumTab += (parseFloat(row.querySelector('.cell-tab').dataset.value) || 0) * hrs;
                     sumScore += (parseFloat(row.querySelector('.cell-score').dataset.value) || 0) * hrs;
-                    
+
                     sumDelta += (parseFloat(row.querySelector('.cell-delta').dataset.value) || 0) * evts;
                     sumP90 += (parseFloat(row.querySelector('.cell-p90').dataset.value) || 0) * evts;
-                    
+
                     let typeArr = row.cells[11].innerText.split('/');
                     sumTypeA += (parseFloat(typeArr[0]) || 0) * evts;
                     sumTypeB += (parseFloat(typeArr[1]) || 0) * evts;
@@ -316,7 +318,7 @@ def generate_report():
                 tr.innerHTML = `
                     <td><input type="checkbox" class="row-checkbox" checked></td>
                     <td class="left-align" style="white-space: nowrap;">${mergedDate}</td>
-                    <td class="left-align"><span class="editable-label" contenteditable="true">Merged: ${labels.join(' + ')}</span></td>
+                    <td class="left-align" style="font-size:11px;"><span class="editable-label" contenteditable="true">Merged: ${labels.join(' + ')}</span></td>
                     <td data-sort="${totalHrs}">${hrStr}</td>
                     <td class="cell-score" data-value="${newScore.toFixed(1)}">${newScore.toFixed(1)}</td>
                     <td class="cell-tab" data-value="${newTab.toFixed(1)}">${newTab.toFixed(1)}</td>
@@ -464,7 +466,7 @@ def generate_report():
                 <tr>
                     <th class="sorttable_nosort">Inc</th>
                     <th class="left-align" style="white-space: nowrap;">Date / Time</th>
-                    <th class="left-align">Night Label</th>
+                    <th class="left-align">Notes</th>
                     <th>Length</th>
                     <th>Score (0-100)</th>
                     <th>TAB</th>
@@ -516,7 +518,7 @@ def generate_report():
                 dt = datetime.datetime.strptime(m_date.group(1), "%Y%m%d%H%M%S")
                 prev_dt = dt - datetime.timedelta(days=1)
                 time_str = dt.strftime("%I:%M%p").lstrip("0").lower()
-                date_str = f"{prev_dt.month}/{prev_dt.day}-{dt.month}/{dt.day} {time_str}"
+                date_str = f"{prev_dt.month}/{prev_dt.day}-{dt.month}/{dt.day}/{dt.strftime('%y')} {time_str}"
             except:
                 pass
 
@@ -530,11 +532,28 @@ def generate_report():
 
         type_str = f"{r.get('pct_a', 0):.0f}/{r.get('pct_b', 0):.0f}/{r.get('pct_c', 0):.0f}"
 
+        # Uncheck daytime sessions by default (start hour before 8pm / after 6am)
+        is_daytime = False
+        m_hour = re.match(r'^\d{8}(\d{2})', fname)
+        if m_hour:
+            hour = int(m_hour.group(1))
+            if 6 <= hour < 20:
+                is_daytime = True
+        checked_attr = "" if is_daytime else "checked"
+
         html.append(f"<tr data-filename='{fname}'>")
-        html.append(f'<td><input type="checkbox" class="row-checkbox" checked></td>')
+        html.append(f'<td><input type="checkbox" class="row-checkbox" {checked_attr}></td>')
         chart_fname = fname.replace('.csv', '_chart.html')
         html.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:openChart(\'charts/{chart_fname}\');" style="text-decoration:none; color:#0366d6;">{date_str}</a></td>')
-        html.append(f'<td class="left-align"><span class="editable-label" contenteditable="true">{r["label"]}</span></td>')
+        # Split label into display label and notes
+        label_text = r["label"]
+        # Strip date prefix and time/duration suffix, whatever remains is notes
+        tmp = label_text
+        tmp = re.sub(r'^\d{4}-\d{2}-\d{2}\s*', '', tmp)
+        tmp = re.sub(r'^\d+/\d+-\d+/\d+\s*', '', tmp)
+        tmp = re.sub(r'\d+[ap]m\s+\d+h\s+\d+m\s*$', '', tmp)
+        notes_text = tmp.strip()
+        html.append(f'<td class="left-align" style="font-size:11px; max-width:250px;"><span class="editable-label" contenteditable="true">{notes_text}</span></td>')
         html.append(f'<td data-sort="{hrs_exact}">{hr_str}</td>')
         html.append(cell('score', r['score']))
         html.append(cell('tab', r['tab']))

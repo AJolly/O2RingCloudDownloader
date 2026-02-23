@@ -42,18 +42,21 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
     
     os.makedirs(chart_dir, exist_ok=True)
     
-    # Read the timestamp column
+    # Read the timestamp column and generate 1Hz time axis matching resampled data
     try:
         df = pd.read_csv(fpath)
         if 'Time' in df.columns:
-            t_axis = pd.to_datetime(df['Time'])
-            start_time_str = t_axis.iloc[0].strftime("%Y-%m-%d %H:%M:%S")
-            start_ts = t_axis.iloc[0].timestamp()
+            csv_times = pd.to_datetime(df['Time'])
+            start_time = csv_times.iloc[0]
+            start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+            start_ts = start_time.timestamp()
+            # Generate 1Hz time axis to match resampled hr_smooth length
+            t_axis = pd.date_range(start=start_time, periods=len(hr_smooth), freq='1s')
         else:
             t_axis = np.arange(len(hr_smooth)) / 3600.0
             start_time_str = ""
             start_ts = 0
-            
+
         # Extract CSV content for in-browser export
         csv_content = df.to_csv(index=False).replace('\\n', '\\\\n').replace('\\"', '\\\\"')
         csv_js_string = f'`{csv_content}`'
@@ -386,7 +389,7 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
     out_lines.append(f"{'='*80}")
 
     try:
-        # Load using the detector's own loader
+        # Load using the detector's own loader (resamples to 1Hz)
         hr_raw = load_data(fpath, source='auto')
         n = len(hr_raw)
         hrs = n / 3600
