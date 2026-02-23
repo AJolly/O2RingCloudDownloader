@@ -60,7 +60,7 @@ def generate_report():
         <meta charset="utf-8">
         <title>HR Spike Detector Results</title>
         <style>
-            body { font-family: sans-serif; margin: 10px; }
+            body { font-family: sans-serif; margin: 10px; background-color: #fff; color: #000; }
             table { border-collapse: collapse; width: 100%; font-size: 13px; }
             th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: center; }
             th { background-color: #f2f2f2; position: sticky; top: 0; cursor: pointer; }
