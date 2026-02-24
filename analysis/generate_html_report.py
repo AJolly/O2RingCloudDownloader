@@ -8,6 +8,7 @@ print("Script starting...", flush=True)
 try:
     import os
     import glob
+    import json
     import numpy as np
     from run_detector_batch import analyze_night, KNOWN_LABELS, CSV_DIR
     
@@ -21,13 +22,33 @@ def generate_report():
     print("Collecting data...", flush=True)
     results = []
     
+    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
+    cache_file = os.path.join(data_dir, 'detector_cache.json')
+    cache = {}
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+            print(f"Loaded cache with {len(cache)} entries.", flush=True)
+        except Exception as e:
+            print(f"Failed to load cache: {e}", flush=True)
+    
     search_path = os.path.join(CSV_DIR, "*.csv")
     csv_files = glob.glob(search_path)
     csv_files.sort(reverse=True)
     print(f"Found {len(csv_files)} files.", flush=True)
     
+    chart_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'charts'))
+    
+    cache_updated = False
+    
     for fpath in csv_files:
         fname = os.path.basename(fpath)
+        
+        # Skip output/report files and trimmed outputs
+        if "detector_results" in fname or "trimmed" in fname:
+            continue
+            
         label = KNOWN_LABELS.get(fname, fname)
         if label == fname:
             # Parse 20260217032620_326am_10h_23m.csv
@@ -39,16 +60,33 @@ def generate_report():
         if not os.path.exists(fpath): continue
         
         try:
-            chart_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'charts'))
-            _, res = analyze_night(fpath, label, generate_chart=True, chart_dir=chart_dir)
-            if res:
-                res['filename'] = fname
+            mtime = os.path.getmtime(fpath)
+            chart_exists = os.path.exists(os.path.join(chart_dir, fname.replace('.csv', '_chart.html')))
+            
+            if fname in cache and cache[fname].get('mtime') == mtime and chart_exists:
+                res = cache[fname]['res']
+                res['label'] = label # dynamic label
                 results.append(res)
-                print(f"Parsed {fname} -> Score: {res.get('score', 0)} | SI/hr: {res.get('si', 0)} | TAB: {res.get('tab', 0)} | Events: {res.get('events', 0)} | Hrs: {res.get('hours', 0)}", flush=True)
+                print(f"Loaded from cache: {fname}", flush=True)
             else:
-                print(f"No results for {fname}", flush=True)
+                _, res = analyze_night(fpath, label, generate_chart=True, chart_dir=chart_dir)
+                if res:
+                    res['filename'] = fname
+                    results.append(res)
+                    cache[fname] = {'mtime': mtime, 'res': res}
+                    cache_updated = True
+                    print(f"Parsed {fname} -> Score: {res.get('score', 0)} | SI/hr: {res.get('si', 0)} | TAB: {res.get('tab', 0)} | Events: {res.get('events', 0)} | Hrs: {res.get('hours', 0)}", flush=True)
+                else:
+                    print(f"No results for {fname}", flush=True)
         except Exception as e:
             print(f"ERROR analyzing {fname}: {e}", flush=True)
+            
+    if cache_updated:
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save cache: {e}", flush=True)
             
     if not results:
         print("No results found.", flush=True)
@@ -74,6 +112,7 @@ def generate_report():
             .editable-label:focus { outline: 1px solid #00f; background-color: #fff; }
         </style>
         <script src="https://www.kryogenix.org/code/browser/sorttable/sorttable.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script>
             function openChart(url) {
                 document.getElementById('chartIframe').src = url;
@@ -153,6 +192,11 @@ def generate_report():
                         }
                     });
                 });
+                
+                // Keep the Chart updated
+                if (typeof renderChart === 'function') {
+                    renderChart();
+                }
             }
             
             function saveData() {
@@ -245,23 +289,22 @@ def generate_report():
                 let totalHrs = 0, totalEvents = 0, totalEvents10 = 0, totalEvents15 = 0;
                 let totalMajorA = 0, totalMajorB = 0, totalMajorC = 0;
                 let sumTab = 0, sumScore = 0, sumDelta = 0, sumP90 = 0;
-                let sumTypeA = 0, sumTypeB = 0, sumTypeC = 0;
                 let filenames = [], labels = [];
 
                 rows.forEach(row => {
                     let hrs = parseFloat(row.cells[3].dataset.sort) || 0;
                     totalHrs += hrs;
                     
-                    let evts = parseFloat(row.cells[12].innerText) || 0;
+                    let evts = parseFloat(row.cells[11].innerText) || 0;
                     totalEvents += evts;
                     
-                    let pcArr = row.cells[13].innerText.split('/');
+                    let pcArr = row.cells[12].innerText.split('/');
                     totalEvents10 += parseInt(pcArr[0] || 0);
                     totalEvents15 += parseInt(pcArr[1] || 0);
                     
-                    totalMajorA += parseInt(row.cells[17].innerText) || 0;
-                    totalMajorB += parseInt(row.cells[18].innerText) || 0;
-                    totalMajorC += parseInt(row.cells[19].innerText) || 0;
+                    totalMajorA += parseInt(row.cells[16].innerText) || 0;
+                    totalMajorB += parseInt(row.cells[17].innerText) || 0;
+                    totalMajorC += parseInt(row.cells[18].innerText) || 0;
                     
                     sumTab += (parseFloat(row.querySelector('.cell-tab').dataset.value) || 0) * hrs;
                     sumScore += (parseFloat(row.querySelector('.cell-score').dataset.value) || 0) * hrs;
@@ -269,12 +312,7 @@ def generate_report():
                     sumDelta += (parseFloat(row.querySelector('.cell-delta').dataset.value) || 0) * evts;
                     sumP90 += (parseFloat(row.querySelector('.cell-p90').dataset.value) || 0) * evts;
                     
-                    let typeArr = row.cells[11].innerText.split('/');
-                    sumTypeA += (parseFloat(typeArr[0]) || 0) * evts;
-                    sumTypeB += (parseFloat(typeArr[1]) || 0) * evts;
-                    sumTypeC += (parseFloat(typeArr[2]) || 0) * evts;
-
-                    filenames.push(row.cells[20].innerText);
+                    filenames.push(row.cells[19].innerText);
                     labels.push(row.querySelector('.editable-label').innerText);
 
                     // Unselect and hide
@@ -293,10 +331,6 @@ def generate_report():
                 let newPc10ph = totalEvents10 / totalHrs;
                 let newPc15ph = totalEvents15 / totalHrs;
                 
-                let newTypeA = totalEvents > 0 ? sumTypeA / totalEvents : 0;
-                let newTypeB = totalEvents > 0 ? sumTypeB / totalEvents : 0;
-                let newTypeC = totalEvents > 0 ? sumTypeC / totalEvents : 0;
-                
                 let newMajorAph = totalMajorA / totalHrs;
                 let newMajorBph = totalMajorB / totalHrs;
                 let newMajorCph = totalMajorC / totalHrs;
@@ -306,8 +340,11 @@ def generate_report():
                 if (m === 60) { h++; m=0; }
                 let hrStr = `${h}h ${m.toString().padStart(2, '0')}m`;
 
-                let firstRow = rows[0];
-                let mergedDate = firstRow ? firstRow.cells[1].innerHTML : "Merged Date";
+                let earliestRow = rows[rows.length - 1];
+                let mergedDate = earliestRow ? earliestRow.cells[1].innerHTML : "Merged Date";
+                
+                filenames.reverse();
+                labels.reverse();
 
                 let tr = document.createElement('tr');
                 tr.dataset.filename = filenames.join(' + ');
@@ -325,7 +362,6 @@ def generate_report():
                     <td class="cell-si" data-value="${newSi.toFixed(1)}">${newSi.toFixed(1)}</td>
                     <td class="cell-pc10" data-value="${newPc10ph.toFixed(1)}">${newPc10ph.toFixed(1)}</td>
                     <td class="cell-pc15" data-value="${newPc15ph.toFixed(1)}">${newPc15ph.toFixed(1)}</td>
-                    <td>${Math.round(newTypeA)}/${Math.round(newTypeB)}/${Math.round(newTypeC)}</td>
                     <td>${totalEvents}</td>
                     <td>${totalEvents10}/${totalEvents15}</td>
                     <td class="cell-events_A_ph" data-value="${newMajorAph.toFixed(1)}">${newMajorAph.toFixed(1)}</td>
@@ -394,6 +430,109 @@ def generate_report():
                 }
             }
 
+            let trendChart = null;
+            const chartMetrics = [
+                { id: 'score', label: 'Score', color: '#e6194b' },
+                { id: 'tab', label: 'TAB', color: '#3cb44b' },
+                { id: 'delta', label: 'Mean ΔHR', color: '#ffe119' },
+                { id: 'p90', label: 'Intensity (P90Δ)', color: '#4363d8' },
+                { id: 'si', label: 'Spike Total index/hr', color: '#f58231', hidden: true },
+                { id: 'pc10', label: 'PC10/hr', color: '#911eb4', hidden: true },
+                { id: 'pc15', label: 'PC15/hr', color: '#46f0f0', hidden: true },
+                { id: 'events_A_ph', label: 'Major A/hr', color: '#f032e6', hidden: true },
+                { id: 'events_B_ph', label: 'Major B/hr', color: '#bcf60c', hidden: true },
+                { id: 'events_C_ph', label: 'Major C/hr', color: '#fabebe', hidden: true }
+            ];
+
+            function renderChart() {
+                let dataRows = Array.from(document.querySelectorAll("tbody tr")).filter(r => {
+                    let cb = r.querySelector('.row-checkbox');
+                    return r.style.display !== 'none' && cb && cb.checked;
+                });
+                
+                dataRows.sort((a,b) => {
+                    let fa = a.dataset.filename ? a.dataset.filename.split(' + ')[0] : '';
+                    let fb = b.dataset.filename ? b.dataset.filename.split(' + ')[0] : '';
+                    return fa.localeCompare(fb);
+                });
+
+                let labels = [];
+                let datasetData = chartMetrics.map(() => []);
+
+                dataRows.forEach(r => {
+                    // Try to parse Date from anchor or just text
+                    let dateCell = r.cells[1];
+                    let dateStr = dateCell.innerText.trim();
+                    labels.push(dateStr);
+                    
+                    chartMetrics.forEach((m, idx) => {
+                        let cell = r.querySelector(`.cell-${m.id}`);
+                        if(cell) {
+                            datasetData[idx].push(parseFloat(cell.dataset.value) || 0);
+                        } else {
+                            datasetData[idx].push(null);
+                        }
+                    });
+                });
+
+                if (trendChart) {
+                    trendChart.data.labels = labels;
+                    chartMetrics.forEach((m, idx) => {
+                        trendChart.data.datasets[idx].data = datasetData[idx];
+                    });
+                    trendChart.update();
+                } else {
+                    let canvas = document.getElementById('trendChart');
+                    if (!canvas) return; // Might not be inserted yet
+                    let ctx = canvas.getContext('2d');
+                    let datasets = chartMetrics.map((m, idx) => ({
+                        label: m.label,
+                        data: datasetData[idx],
+                        borderColor: m.color,
+                        backgroundColor: m.color,
+                        fill: false,
+                        hidden: m.hidden,
+                        tension: 0.1,
+                        yAxisID: `y-${m.id}`
+                    }));
+                    
+                    let scales = {
+                        x: { display: true }
+                    };
+                    
+                    // Create an individual hidden axis for each metric so they all scale nicely
+                    chartMetrics.forEach((m, idx) => {
+                        scales[`y-${m.id}`] = {
+                            display: false, // Hide all these individual axes so it doesn't clutter
+                            beginAtZero: false
+                        };
+                    });
+                    
+                    trendChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: {
+                                mode: 'index',
+                                intersect: false,
+                            },
+                            scales: scales,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                    labels: { boxWidth: 12 }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
             document.addEventListener("DOMContentLoaded", () => {
                 loadData();
                 updateColors();
@@ -441,6 +580,11 @@ def generate_report():
             <iframe id="chartIframe" style="width:100%; flex-grow: 1; border:none;"></iframe>
         </div>
         <h1>HR Spike Detection Results</h1>
+        
+        <div id="chartContainer" style="width: 100%; height: 350px; margin-bottom: 20px; border: 1px solid #ddd; background: #fff; padding: 10px; box-sizing: border-box; border-radius: 4px;">
+            <canvas id="trendChart"></canvas>
+        </div>
+        
         <p>
             Generated report. Columns with colors indicate severity (Green=Low, Red=High). Uncheck rows to exclude from color scaling. Edit labels directly.<br><br>
             <button id="mergeBtn" onclick="mergeSelected()" disabled style="padding: 6px 12px; font-weight: bold; cursor: not-allowed; opacity: 0.5; background-color: #2196F3; color: white; border: none; border-radius: 4px;">Merge Selected Rows (UI Only)</button>
@@ -456,7 +600,12 @@ def generate_report():
                 <li><strong>TAB:</strong> Total Autonomic Burden. The sum of the area-under-the-curve for all spikes, heavily reflecting spike duration and intensity.</li>
                 <li><strong>Mean ΔHR:</strong> The average heart rate jump (in bpm) across all spikes.</li>
                 <li><strong>Intensity (P90Δ):</strong> The 90th percentile peak jump. Shows the intensity of the worst 10% of your spikes.</li>
-                <li><strong>Type A/B/C %:</strong> Characteristics of the spikes (A=Drop/Recovery, B=Sustained/No Recovery, C=Blunted).</li>
+            </ul>
+            <strong>Experimental Major Spike Algorithms:</strong> These try to detect only the most profound "major" spikes using different parameters.<br>
+            <ul>
+                <li><strong>Major A:</strong> Requires &ge;15 bpm jump, minimum 120s refractor period (ignores subsequent spikes for 2 mins).</li>
+                <li><strong>Major B:</strong> Requires &ge;20 bpm jump, minimum 60s refractor period (higher threshold, shorter lockout).</li>
+                <li><strong>Major C:</strong> Requires &ge;18 bpm jump, minimum 60s refractor period.</li>
             </ul>
         </p>
         <table class="sortable">
@@ -473,7 +622,6 @@ def generate_report():
                     <th>Spike (PC) Total index/hr</th>
                     <th>PC10/hr</th>
                     <th>PC15/hr</th>
-                    <th>Type A/B/C %</th>
                     <th>Events</th>
                     <th>Events &ge;10/15</th>
                     <th title="Major Spike Detector: 15bpm min delta, 120s refractor (Per Hour)">Major A / hr</th>
@@ -489,7 +637,7 @@ def generate_report():
 
     import datetime
 
-    for r in results:
+    for idx, r in enumerate(results):
         def cell(metric_key, val):
             return f'<td class="cell-{metric_key}" data-value="{val}">{val}</td>'
         
@@ -528,12 +676,15 @@ def generate_report():
                 time_part = m_date.group(4).split('_')[0] if '_' in m_date.group(4) else m_date.group(4)
                 date_str += f" ({time_part})"
 
-        type_str = f"{r.get('pct_a', 0):.0f}/{r.get('pct_b', 0):.0f}/{r.get('pct_c', 0):.0f}"
-
         html.append(f"<tr data-filename='{fname}'>")
         html.append(f'<td><input type="checkbox" class="row-checkbox" checked></td>')
         chart_fname = fname.replace('.csv', '_chart.html')
-        html.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:openChart(\'charts/{chart_fname}\');" style="text-decoration:none; color:#0366d6;">{date_str}</a></td>')
+        
+        display_date = f"<b>{date_str}</b>"
+        if idx == 0:
+            display_date += " <span style='font-size: 14px; font-weight: bold; color: #d97706;'>(Click me!)</span>"
+            
+        html.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:openChart(\'charts/{chart_fname}\');" style="text-decoration:none; color:#0366d6;">{display_date}</a></td>')
         html.append(f'<td class="left-align"><span class="editable-label" contenteditable="true">{r["label"]}</span></td>')
         html.append(f'<td data-sort="{hrs_exact}">{hr_str}</td>')
         html.append(cell('score', r['score']))
@@ -543,7 +694,6 @@ def generate_report():
         html.append(cell('si', r['si']))
         html.append(cell('pc10', r['pc10_per_hr']))
         html.append(cell('pc15', r['pc15_per_hr']))
-        html.append(f'<td>{type_str}</td>')
         html.append(f'<td>{r["events"]}</td>')
         html.append(f'<td>{pc_split}</td>')
         html.append(cell('events_A_ph', r.get('events_A_ph', 0)))

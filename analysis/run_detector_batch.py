@@ -109,10 +109,25 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
             hovertext=f"Score: {event.severity_score:.1f}<br>ΔHR: {event.delta_hr:.1f}<br>Dur: {event.total_duration}s"
         ))
 
+    valid_indices = np.where(valid)[0]
+    if len(valid_indices) > 0:
+        first_valid_idx = valid_indices[0]
+        last_valid_idx = valid_indices[-1]
+        x_min = t_axis.iloc[first_valid_idx] if hasattr(t_axis, 'iloc') else t_axis[first_valid_idx]
+        x_max = t_axis.iloc[last_valid_idx] if hasattr(t_axis, 'iloc') else t_axis[last_valid_idx]
+    else:
+        x_min = t_axis.iloc[0] if hasattr(t_axis, 'iloc') else t_axis[0]
+        x_max = t_axis.iloc[-1] if hasattr(t_axis, 'iloc') else t_axis[-1]
+        
+    min_hr = np.nanmin(hr_plot) if not np.all(np.isnan(hr_plot)) else 40
+    y_min = max(30, min_hr - 2)
+
     fig.update_layout(
         title=f"HR Analysis - {os.path.basename(fpath)} (Score: {summary.severity_score:.1f})",
         xaxis_title="Time",
+        xaxis=dict(range=[x_min, x_max]),
         yaxis_title="Heart Rate (bpm)",
+        yaxis=dict(range=[y_min, 140]),
         dragmode="select",
         hovermode="x unified",
         margin=dict(l=40, r=40, t=40, b=40)
