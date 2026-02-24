@@ -54,7 +54,7 @@ def generate_report():
             # Parse 20260217032620_326am_10h_23m.csv
             m = re.match(r'^(\d{4})(\d{2})(\d{2})\d{6}_(.*)\.csv', fname)
             if m:
-                label = f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}"
+                label = m.group(4)
                 label = label.replace('_', ' ')
 
         if not os.path.exists(fpath): continue
@@ -613,7 +613,7 @@ def generate_report():
                 <tr>
                     <th class="sorttable_nosort">Inc</th>
                     <th class="left-align" style="white-space: nowrap;">Date / Time</th>
-                    <th class="left-align">Night Label</th>
+                    <th class="left-align">Notes</th>
                     <th>Length</th>
                     <th>Score (0-100)</th>
                     <th>TAB</th>
