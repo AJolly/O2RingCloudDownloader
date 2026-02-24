@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Viatom/Wellue O2Ring Data Downloader"
 dependencies = [
     "requests",
+    "numpy",
+    "plotly",
+    "pandas",
 ]
 
 [tool.uv]
