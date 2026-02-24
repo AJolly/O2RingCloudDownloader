@@ -894,7 +894,7 @@ def load_data(filepath: str, source: str = 'auto') -> np.ndarray:
         
         if hr_cols:
             hr_col = hr_cols[0]
-            
+
             hr = df[hr_col].values.astype(float)
         elif df.shape[1] == 1:
             hr = df.iloc[:, 0].values.astype(float)
@@ -907,7 +907,21 @@ def load_data(filepath: str, source: str = 'auto') -> np.ndarray:
             else:
                 print(f"Available columns: {list(df.columns)}")
                 raise ValueError("Could not identify HR column. Please specify.")
-        
+
+        # Resample to 1Hz if timestamps indicate non-1s intervals
+        time_cols = [c for c in df.columns if c.lower() in ['time', 'timestamp']]
+        if time_cols and len(hr) >= 2:
+            try:
+                t = pd.to_datetime(df[time_cols[0]])
+                interval_s = (t.iloc[1] - t.iloc[0]).total_seconds()
+                if interval_s > 1.5:  # Not already 1Hz
+                    # Resample by repeating each value for its interval
+                    hr_1hz = np.repeat(hr, int(round(interval_s)))
+                    print(f"  Resampled from {interval_s:.0f}s intervals: {len(hr)} -> {len(hr_1hz)} samples")
+                    return hr_1hz
+            except Exception:
+                pass
+
         return hr
         
     except ImportError:
