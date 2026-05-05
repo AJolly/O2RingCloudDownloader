@@ -183,8 +183,13 @@ def load_ignored_sessions():
         except Exception as e:
             print(f"Warning: Could not create {log_file}: {e}")
         return set()
+    ignored = set()
     with open(log_file, 'r') as f:
-        return set(line.strip() for line in f if line.strip())
+        for line in f:
+            parts = line.split()
+            if parts:
+                ignored.add(parts[0])
+    return ignored
 
 def log_ignored_session(session_id):
     log_file = os.path.join(SCRIPT_DIR, "ignored_sessions.txt")

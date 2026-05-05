@@ -214,6 +214,7 @@ class NightSummary:
     # Burden
     total_autonomic_burden: float   # bpm·sec/hour
     tab_normalized: float           # %·sec/hour (baseline-normalized)
+    tab10: float                    # TAB from events >= 10 bpm
     
     # Duration
     median_duration: float          # median spike duration
@@ -236,6 +237,9 @@ class NightSummary:
     # Composite
     severity_score: float           # 0-100 composite score
     severity_label: str             # normal/mild/moderate/severe
+    
+    # Motion
+    tmb: float = 0.0                # Total Motion Burden (sum of motion / valid_hours)
 
 
 # ============================================================
@@ -634,7 +638,8 @@ def compute_prri(hr_smooth: np.ndarray, valid: np.ndarray, delta: float = 6.0) -
 # ============================================================
 
 def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
-                    total_seconds: int, hr_smooth: np.ndarray = None) -> NightSummary:
+                    total_seconds: int, hr_smooth: np.ndarray = None,
+                    motion: np.ndarray = None) -> NightSummary:
     """Compute all night-level metrics."""
     
     valid_seconds = int(np.sum(valid))
@@ -657,7 +662,8 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
             first_half_si=0, second_half_si=0, temporal_ratio=0,
             spike_interval_cv=0,
             pct_type_a=0, pct_type_b=0, pct_type_c=0, pct_type_d=0,
-            severity_score=0, severity_label="normal"
+            severity_score=0, severity_label="normal",
+            tmb=0.0
         )
     
     # Calculate PRRI-6
@@ -685,6 +691,8 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
     # Burden
     tab = float(np.sum(aucs)) / valid_hours if valid_hours > 0 else 0
     tab_norm = float(np.sum(aucs_pct)) / valid_hours if valid_hours > 0 else 0
+    aucs10 = np.array([e.auc for e in events if e.delta_hr >= 10])
+    tab10 = float(np.sum(aucs10)) / valid_hours if valid_hours > 0 else 0
     
     # Duration
     med_dur = float(np.median(durations))
@@ -760,6 +768,10 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
     else:
         label = "very severe"
     
+    tmb_val = 0.0
+    if motion is not None and valid_hours > 0:
+        tmb_val = np.sum(motion[valid]) / valid_hours
+        
     return NightSummary(
         recording_hours=round(recording_hours, 2),
         valid_hours=round(valid_hours, 2),
@@ -774,6 +786,7 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
         mean_delta_hr_pct=round(mean_d_pct, 1),
         total_autonomic_burden=round(tab, 0),
         tab_normalized=round(tab_norm, 0),
+        tab10=round(tab10, 0),
         median_duration=round(med_dur, 1),
         mean_duration=round(mean_dur, 1),
         first_half_si=round(first_si, 1),
@@ -785,7 +798,8 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
         pct_type_c=round(pct_c, 1),
         pct_type_d=round(pct_d, 1),
         severity_score=round(total_score, 1),
-        severity_label=label
+        severity_label=label,
+        tmb=round(tmb_val, 1)
     )
 
 
@@ -927,10 +941,10 @@ def plot_night(hr_smooth, baseline, valid, events, summary, output_path=None, st
 # DATA LOADING
 # ============================================================
 
-def load_data(filepath: str, source: str = 'auto') -> np.ndarray:
+def load_data(filepath: str, source: str = 'auto', return_motion: bool = False):
     """
     Load HR data from various formats.
-    Returns 1-second HR array.
+    Returns 1-second HR array (and optionally motion array if return_motion=True).
     """
     # Try to detect format
     with open(filepath, 'r') as f:
@@ -967,6 +981,14 @@ def load_data(filepath: str, source: str = 'auto') -> np.ndarray:
                 print(f"Available columns: {list(df.columns)}")
                 raise ValueError("Could not identify HR column. Please specify.")
         
+        if return_motion:
+            motion_cols = [c for c in df.columns if 'motion' in c.lower()]
+            if motion_cols:
+                motion = df[motion_cols[0]].values.astype(float)
+            else:
+                motion = np.zeros_like(hr)
+            return hr, motion
+            
         return hr
         
     except ImportError:

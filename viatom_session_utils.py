@@ -97,12 +97,9 @@ def parse_o2rings(filepath: Path, data: bytes):
     rc_offset = file_size - 36
     record_count = struct.unpack_from('<H', data, rc_offset)[0]
     
-    # Handle files > 18.2 hours where record_count overflows
+    # Handle files > 18.2 hours where record_count overflows uint16
     actual_records = (file_size - 46) // 3
     if actual_records > 65535 and record_count == actual_records % 65536:
-        record_count = actual_records
-    elif actual_records < 65535 and actual_records > record_count:
-        # If the file was truncated, actual is smaller, or if just safe, we can use actual
         record_count = actual_records
 
     ts = parse_filename_timestamp(filepath.stem)
@@ -120,6 +117,9 @@ def parse_o2rings(filepath: Path, data: bytes):
         motion = data[offset + 2]
 
         oximetry_invalid = (spo2 == 0xFF or hr == 0xFF)
+        # Physiological validity: SpO2 can't exceed 100%, HR above 250 is sensor noise
+        if (spo2 > 100 and spo2 != 0xFF) or (hr > 250 and hr != 0xFF):
+            oximetry_invalid = True
         vibration = 0
 
         t = ts + timedelta(seconds=i)

@@ -34,7 +34,7 @@ csv_files = glob.glob(os.path.join(CSV_DIR, "*.csv"))
 csv_files.sort(reverse=True)
 
 
-def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, chart_dir):
+def generate_session_chart(fpath, hr_smooth, baseline, valid, events_dict, summary, chart_dir, motion_raw=None):
     import plotly.graph_objects as go
     import pandas as pd
     from datetime import datetime
@@ -74,7 +74,12 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
     # Baseline
     fig.add_trace(go.Scatter(x=t_axis, y=baseline, mode='lines', name='Baseline (P25)', line=dict(color='blue', width=2), opacity=0.8))
     
-    # Event highlights
+    has_motion = motion_raw is not None
+    if has_motion:
+        motion_plot = motion_raw.copy()
+        motion_plot[~valid] = np.nan
+        fig.add_trace(go.Scatter(x=t_axis, y=motion_plot, mode='lines', name='Motion', fill='tozeroy', fillcolor='rgba(200, 200, 200, 0.3)', line=dict(color='rgba(150, 150, 150, 0.5)', width=1), yaxis='y2', opacity=0.8))
+    
     type_colors = {
         'A': 'orange',
         'B': 'purple',
@@ -83,30 +88,51 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
         'U': 'gray'
     }
     
-    for event in events:
-        stype = str(event.spike_type).split('.')[-1]
-        tcode = 'U'
-        if '_' in stype:
-            tcode = stype.split('_')[0]
+    shapes_by_preset = {}
+    preset_names = list(events_dict.keys())
+    
+    for preset_name, preset_events in events_dict.items():
+        shapes_for_this_preset = []
+        t_peaks = []
+        y_peaks = []
+        colors = []
+        hover_texts = []
+        
+        for event in preset_events:
+            stype = str(event.spike_type).split('.')[-1]
+            tcode = stype.split('_')[0] if '_' in stype else 'U'
+            color = type_colors.get(tcode, 'gray')
             
-        color = type_colors.get(tcode, 'gray')
+            t0 = t_axis.iloc[event.onset_idx] if hasattr(t_axis, 'iloc') else t_axis[event.onset_idx]
+            t1 = t_axis.iloc[event.end_idx] if hasattr(t_axis, 'iloc') else t_axis[event.end_idx]
+            t_peak = t_axis.iloc[event.peak_idx] if hasattr(t_axis, 'iloc') else t_axis[event.peak_idx]
+            
+            t_peaks.append(t_peak)
+            y_peaks.append(event.peak_hr)
+            colors.append(color)
+            hover_texts.append(f"<b>{preset_name}</b><br>Type: {stype}<br>Score: {event.severity_score:.1f}<br>ΔHR: {event.delta_hr:.1f}<br>Dur: {event.total_duration}s")
+            
+            shapes_for_this_preset.append(dict(
+                type="rect",
+                xref="x", yref="paper",
+                x0=t0, y0=0, x1=t1, y1=1,
+                fillcolor=color,
+                opacity=0.15,
+                line_width=0,
+                layer="below"
+            ))
+            
+        shapes_by_preset[preset_name] = shapes_for_this_preset
+        is_active = (preset_name == 'Standard')
         
-        t0 = t_axis.iloc[event.onset_idx] if hasattr(t_axis, 'iloc') else t_axis[event.onset_idx]
-        t1 = t_axis.iloc[event.end_idx] if hasattr(t_axis, 'iloc') else t_axis[event.end_idx]
-        t_peak = t_axis.iloc[event.peak_idx] if hasattr(t_axis, 'iloc') else t_axis[event.peak_idx]
-        
-        # Add vrect
-        fig.add_vrect(x0=t0, x1=t1, fillcolor=color, opacity=0.15, line_width=0)
-        
-        # Add peak marker
         fig.add_trace(go.Scatter(
-            x=[t_peak], y=[event.peak_hr],
+            x=t_peaks, y=y_peaks,
             mode='markers',
-            marker=dict(color=color, size=7, symbol='triangle-down'),
-            name=f'Type {stype}',
-            showlegend=False,
+            marker=dict(color=colors, size=8, symbol='triangle-down', line=dict(color='black', width=0.5)),
+            name=f'{preset_name} ({len(preset_events)})',
             hoverinfo='text',
-            hovertext=f"Score: {event.severity_score:.1f}<br>ΔHR: {event.delta_hr:.1f}<br>Dur: {event.total_duration}s"
+            hovertext=hover_texts,
+            visible=is_active
         ))
 
     valid_indices = np.where(valid)[0]
@@ -124,9 +150,24 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
     y_min = max(30, min_hr - 5)
     y_max = min(200, max_hr + 10)
 
+    # Build Dropdown Menu
+    buttons = []
+    base_vis = [True, True, True] if has_motion else [True, True]
+    for i, p_name in enumerate(preset_names):
+        visibilities = base_vis + [i == j for j in range(len(preset_names))]
+        buttons.append(dict(
+            label=f"Preset: {p_name}",
+            method="update",
+            args=[
+                {"visible": visibilities},
+                {"shapes": shapes_by_preset[p_name],
+                 "title": f"{os.path.basename(fpath)} (Preset: {p_name})"}
+            ]
+        ))
+
     fig.update_layout(
         title=dict(
-            text=f"{os.path.basename(fpath)} (Score: {summary.severity_score:.1f})",
+            text=f"{os.path.basename(fpath)} (Preset: Standard)",
             y=0.98,
             x=0.02,
             xanchor='left',
@@ -137,9 +178,25 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
         xaxis=dict(range=[x_min, x_max]),
         yaxis_title="Heart Rate (bpm)",
         yaxis=dict(range=[y_min, y_max]),
+        yaxis2=dict(
+            title="Motion",
+            overlaying='y',
+            side='right',
+            range=[0, 80],
+            showgrid=False,
+            visible=has_motion
+        ),
         dragmode="select",
         hovermode="x unified",
-        margin=dict(l=40, r=40, t=10, b=10)
+        margin=dict(l=40, r=40, t=10, b=10),
+        shapes=shapes_by_preset.get('Standard', []),
+        updatemenus=[dict(
+            active=preset_names.index('Standard') if 'Standard' in preset_names else 0,
+            buttons=buttons,
+            x=0.01, y=0.99,
+            xanchor="left", yanchor="top",
+            bgcolor="rgba(255,255,255,0.9)"
+        )]
     )
 
     chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
@@ -397,7 +454,7 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
         print(f"Chart generated: {out_path}", flush=True)
 
 
-def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
+def analyze_night(fpath, label, generate_chart=False, chart_dir=None, trim_after_time=None):
     """Run detection pipeline on a single file and return text report + result dict."""
     out_lines = []
     
@@ -408,12 +465,50 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
 
     try:
         # Load using the detector's own loader
-        hr_raw = load_data(fpath, source='auto')
+        hr_raw, motion_raw = load_data(fpath, source='auto', return_motion=True)
         n = len(hr_raw)
         hrs = n / 3600
         out_lines.append(f"Samples: {n} ({hrs:.1f} hours)")
         out_lines.append(f"Raw HR: min={int(np.nanmin(hr_raw))} max={int(np.nanmax(hr_raw))} mean={np.nanmean(hr_raw):.1f}")
-        
+
+        # Apply trim directive: truncate data after a specified wall-clock time
+        if trim_after_time is not None:
+            import pandas as pd
+            import datetime as dt_mod
+            try:
+                df_time = pd.read_csv(fpath, usecols=['Time'])
+                if 'Time' in df_time.columns:
+                    timestamps = pd.to_datetime(df_time['Time'])
+                    start_time = timestamps.iloc[0].time()
+                    # Handle sessions spanning midnight: if session starts in PM
+                    # and trim time is AM, only match after midnight crossing
+                    spans_midnight = start_time.hour >= 18  # started in evening
+                    trim_is_morning = trim_after_time.hour < 12
+                    cutoff_idx = None
+                    for idx_t, ts in enumerate(timestamps):
+                        ts_time = ts.time()
+                        if spans_midnight and trim_is_morning:
+                            # Only start looking after midnight has passed
+                            if ts_time.hour >= 12:
+                                continue  # still in PM evening part
+                        if ts_time >= trim_after_time:
+                            # Extra check: for midnight-spanning, don't trim PM portion
+                            if spans_midnight and trim_is_morning and ts_time.hour >= 12:
+                                continue
+                            cutoff_idx = idx_t
+                            break
+                    if cutoff_idx is not None:
+                        original_n = len(hr_raw)
+                        hr_raw = hr_raw[:cutoff_idx]
+                        motion_raw = motion_raw[:cutoff_idx]
+                        n = len(hr_raw)
+                        hrs = n / 3600
+                        out_lines.append(f"TRIMMED: data after {trim_after_time} excluded (kept {n}/{original_n} samples, {hrs:.1f}h)")
+                    else:
+                        out_lines.append(f"TRIM: cutoff time {trim_after_time} not found in data range")
+            except Exception as e:
+                out_lines.append(f"TRIM ERROR: {e}")
+
         # Run pipeline with SENSITIVE preset
         hr_smooth, valid = preprocess(hr_raw)
         baseline = compute_baseline(hr_smooth, valid)
@@ -421,14 +516,9 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
         params = PRESETS[Preset.SENSITIVE].copy()
         events = detect_spikes(hr_smooth, baseline, valid, params)
         
-        summary = compute_summary(events, valid, n, hr_smooth=hr_smooth)
+        summary = compute_summary(events, valid, n, hr_smooth=hr_smooth, motion=motion_raw)
         
-        if generate_chart and chart_dir:
-            try:
-                generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, chart_dir)
-            except Exception as e:
-                out_lines.append(f"Chart generation error: {e}")
-                traceback.print_exc()
+        events_dict = {'Sensitive': events}
         
         out_lines.append(f"\n--- SENSITIVE PRESET ---")
         out_lines.append(f"Events detected: {len(events)}")
@@ -489,13 +579,13 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
             'hours_exact': hrs,
             'events': len(events),
             'si': summary.spike_index,
+            'tmb': summary.tmb,
             'prri_index': round(summary.prri_index, 1),
             'prri_count': summary.prri_count,
             'tab': round(summary.total_autonomic_burden, 1),
+            'tab10': round(summary.tab10, 1),
             'score': summary.severity_score,
-            'mean_delta': round(np.mean(deltas), 1) if events else 0,
             'p90_delta': round(np.percentile(deltas, 90), 1) if events else 0,
-            'mean_peak': round(np.mean(peaks), 1) if events else 0,
             'pc10_per_hr': round(sum(1 for d in deltas if d >= 10)/hrs, 1) if events else 0,
             'pc15_per_hr': round(sum(1 for d in deltas if d >= 15)/hrs, 1) if events else 0,
             'pct_a': round(summary.pct_type_a, 1),
@@ -509,6 +599,33 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
             p_events = detect_spikes(hr_smooth, baseline, valid, p_params)
             res_dict[f'events_{pname}'] = len(p_events)
             res_dict[f'events_{pname}_ph'] = round(len(p_events) / hrs, 1) if hrs > 0 else 0
+            
+            p_aucs = [e.auc for e in p_events]
+            res_dict[f'tab_major_{pname.lower()}'] = round(float(np.sum(p_aucs)) / hrs, 1) if hrs > 0 else 0
+            
+        # Calculate comparison presets
+        for pname, pkey in [("standard", Preset.STANDARD), ("specific", Preset.SPECIFIC), ("clinical", Preset.CLINICAL)]:
+            p_params = PRESETS[pkey].copy()
+            p_events = detect_spikes(hr_smooth, baseline, valid, p_params)
+            p_summary = compute_summary(p_events, valid, n)
+            res_dict[f'score_{pname}'] = round(p_summary.severity_score, 1)
+            res_dict[f'tab_{pname}'] = round(p_summary.total_autonomic_burden, 1)
+            events_dict[pname.capitalize()] = p_events
+            
+            # Derived metrics per-preset (for engine-switching dropdown)
+            p_deltas = [e.delta_hr for e in p_events]
+            res_dict[f'si_{pname}'] = round(p_summary.spike_index, 1)
+            res_dict[f'p90_delta_{pname}'] = round(np.percentile(p_deltas, 90), 1) if p_events else 0
+            res_dict[f'pc10_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 10)/hrs, 1) if p_events else 0
+            res_dict[f'pc15_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 15)/hrs, 1) if p_events else 0
+            res_dict[f'tab10_{pname}'] = round(p_summary.tab10, 1)
+            
+        if generate_chart and chart_dir:
+            try:
+                generate_session_chart(fpath, hr_smooth, baseline, valid, events_dict, summary, chart_dir, motion_raw)
+            except Exception as e:
+                out_lines.append(f"Chart generation error: {e}")
+                traceback.print_exc()
         
         return "\n".join(out_lines), res_dict
 
@@ -525,11 +642,26 @@ def main():
     csv_files = glob.glob(os.path.join(CSV_DIR, "*.csv"))
     # Sort reverse to show newest first
     csv_files.sort(reverse=True)
+    
+    ignored_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ignored_sessions.txt")
+    ignored_sessions = set()
+    if os.path.exists(ignored_file):
+        with open(ignored_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.split()
+                if parts:
+                    ignored_sessions.add(parts[0])
 
     print(f"Found {len(csv_files)} files to process")
 
     for fpath in csv_files:
         fname = os.path.basename(fpath)
+        
+        # Skip ignored sessions
+        if any(fname.startswith(ign) for ign in ignored_sessions):
+            print(f"Skipping ignored session: {fname}")
+            continue
+            
         label = KNOWN_LABELS.get(fname, fname)
         
         if not os.path.exists(fpath):
