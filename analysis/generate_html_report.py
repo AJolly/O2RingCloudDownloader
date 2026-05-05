@@ -45,8 +45,8 @@ def generate_report():
     for fpath in csv_files:
         fname = os.path.basename(fpath)
         
-        # Skip output/report files and trimmed outputs
-        if "detector_results" in fname or "trimmed" in fname:
+        # Skip output/report files
+        if "detector_results" in fname:
             continue
             
         label = KNOWN_LABELS.get(fname, fname)
@@ -114,12 +114,35 @@ def generate_report():
         <script src="https://www.kryogenix.org/code/browser/sorttable/sorttable.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script>
-            function openChart(url) {
-                document.getElementById('chartIframe').src = url;
-                document.getElementById('chartModal').style.display = 'flex';
+            function openChart(url, el) {
+                let tr = el.closest('tr');
+                let nextTr = tr.nextElementSibling;
+                
+                if (nextTr && nextTr.classList.contains('inline-chart-row')) {
+                    nextTr.remove();
+                    return;
+                }
+                
+                let newTr = document.createElement('tr');
+                newTr.classList.add('inline-chart-row');
+                
+                let td = document.createElement('td');
+                td.colSpan = tr.children.length;
+                td.style.padding = '0';
+                
+                let iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.style.width = '100%';
+                iframe.style.height = '410px';
+                iframe.style.border = 'none';
+                iframe.style.display = 'block';
+                
+                td.appendChild(iframe);
+                newTr.appendChild(td);
+                tr.parentNode.insertBefore(newTr, tr.nextSibling);
             }
             
-            const metricsFields = ['score', 'si', 'tab', 'delta', 'p90', 'pc10', 'pc15', 'events_A_ph', 'events_B_ph', 'events_C_ph'];
+            const metricsFields = ['score', 'si', 'prri_index', 'tab', 'delta', 'p90', 'pc10', 'pc15', 'events_A_ph', 'events_B_ph', 'events_C_ph'];
             
             function getColor(value, min_val, max_val, inverse) {
                 if (isNaN(value)) return "#ffffff";
@@ -286,33 +309,37 @@ def generate_report():
             function doMergeForRows(rows, saveAfter) {
                 if (rows.length < 2) return;
                 
-                let totalHrs = 0, totalEvents = 0, totalEvents10 = 0, totalEvents15 = 0;
+                let totalHrs = 0, totalEvents = 0, totalEvents10 = 0, totalEvents15 = 0, totalPrriCount = 0;
                 let totalMajorA = 0, totalMajorB = 0, totalMajorC = 0;
                 let sumTab = 0, sumScore = 0, sumDelta = 0, sumP90 = 0;
+                let totalPrriRaw = 0;
                 let filenames = [], labels = [];
 
                 rows.forEach(row => {
                     let hrs = parseFloat(row.cells[3].dataset.sort) || 0;
                     totalHrs += hrs;
                     
-                    let evts = parseFloat(row.cells[11].innerText) || 0;
+                    let evts = parseFloat(row.cells[12].innerText) || 0;
                     totalEvents += evts;
                     
-                    let pcArr = row.cells[12].innerText.split('/');
+                    totalPrriRaw += parseInt(row.cells[13].innerText) || 0;
+                    
+                    let pcArr = row.cells[14].innerText.split('/');
                     totalEvents10 += parseInt(pcArr[0] || 0);
                     totalEvents15 += parseInt(pcArr[1] || 0);
                     
-                    totalMajorA += parseInt(row.cells[16].innerText) || 0;
-                    totalMajorB += parseInt(row.cells[17].innerText) || 0;
-                    totalMajorC += parseInt(row.cells[18].innerText) || 0;
+                    totalMajorA += parseInt(row.cells[18].innerText) || 0;
+                    totalMajorB += parseInt(row.cells[19].innerText) || 0;
+                    totalMajorC += parseInt(row.cells[20].innerText) || 0;
                     
                     sumTab += (parseFloat(row.querySelector('.cell-tab').dataset.value) || 0) * hrs;
                     sumScore += (parseFloat(row.querySelector('.cell-score').dataset.value) || 0) * hrs;
                     
                     sumDelta += (parseFloat(row.querySelector('.cell-delta').dataset.value) || 0) * evts;
                     sumP90 += (parseFloat(row.querySelector('.cell-p90').dataset.value) || 0) * evts;
+                    totalPrriCount += (parseFloat(row.querySelector('.cell-prri_index').dataset.value) || 0) * hrs;
                     
-                    filenames.push(row.cells[19].innerText);
+                    filenames.push(row.cells[21].innerText);
                     labels.push(row.querySelector('.editable-label').innerText);
 
                     // Unselect and hide
@@ -328,6 +355,7 @@ def generate_report():
                 let newP90 = totalEvents > 0 ? sumP90 / totalEvents : 0;
                 
                 let newSi = totalEvents / totalHrs;
+                let newPrri = totalPrriCount / totalHrs;
                 let newPc10ph = totalEvents10 / totalHrs;
                 let newPc15ph = totalEvents15 / totalHrs;
                 
@@ -360,9 +388,11 @@ def generate_report():
                     <td class="cell-delta" data-value="${newDelta.toFixed(1)}">${newDelta.toFixed(1)}</td>
                     <td class="cell-p90" data-value="${newP90.toFixed(1)}">${newP90.toFixed(1)}</td>
                     <td class="cell-si" data-value="${newSi.toFixed(1)}">${newSi.toFixed(1)}</td>
+                    <td class="cell-prri_index" data-value="${newPrri.toFixed(1)}">${newPrri.toFixed(1)}</td>
                     <td class="cell-pc10" data-value="${newPc10ph.toFixed(1)}">${newPc10ph.toFixed(1)}</td>
                     <td class="cell-pc15" data-value="${newPc15ph.toFixed(1)}">${newPc15ph.toFixed(1)}</td>
                     <td>${totalEvents}</td>
+                    <td>${totalPrriRaw}</td>
                     <td>${totalEvents10}/${totalEvents15}</td>
                     <td class="cell-events_A_ph" data-value="${newMajorAph.toFixed(1)}">${newMajorAph.toFixed(1)}</td>
                     <td class="cell-events_B_ph" data-value="${newMajorBph.toFixed(1)}">${newMajorBph.toFixed(1)}</td>
@@ -376,8 +406,8 @@ def generate_report():
                     </td>
                 `;
 
-                if (firstRow && firstRow.parentNode) {
-                    firstRow.parentNode.insertBefore(tr, firstRow);
+                if (rows[0] && rows[0].parentNode) {
+                    rows[0].parentNode.insertBefore(tr, rows[0]);
                 } else {
                     let tbody = document.querySelector('tbody');
                     tbody.insertBefore(tr, tbody.firstChild);
@@ -437,6 +467,7 @@ def generate_report():
                 { id: 'delta', label: 'Mean ΔHR', color: '#ffe119' },
                 { id: 'p90', label: 'Intensity (P90Δ)', color: '#4363d8' },
                 { id: 'si', label: 'Spike Total index/hr', color: '#f58231', hidden: true },
+                { id: 'prri_index', label: 'PRRI-6/hr (raw)', color: '#808000', hidden: true },
                 { id: 'pc10', label: 'PC10/hr', color: '#911eb4', hidden: true },
                 { id: 'pc15', label: 'PC15/hr', color: '#46f0f0', hidden: true },
                 { id: 'events_A_ph', label: 'Major A/hr', color: '#f032e6', hidden: true },
@@ -573,12 +604,6 @@ def generate_report():
         </script>
     </head>
     <body>
-        <div id="chartModal" style="display:none; position:fixed; top:5%; left:2%; width:96%; height:90%; background:white; z-index:1000; border:2px solid #ccc; box-shadow:0 0 20px rgba(0,0,0,0.5); flex-direction: column;">
-            <div style="background:#f8f9fa; padding:10px;text-align:right; border-bottom:1px solid #ddd; flex-shrink: 0;">
-                <button onclick="document.getElementById('chartModal').style.display='none';" style="padding:6px 15px; cursor:pointer; font-weight:bold; border-radius:4px; border:1px solid #ccc; background:#fff;">Close Chart</button>
-            </div>
-            <iframe id="chartIframe" style="width:100%; flex-grow: 1; border:none;"></iframe>
-        </div>
         <h1>HR Spike Detection Results</h1>
         
         <div id="chartContainer" style="width: 100%; height: 350px; margin-bottom: 20px; border: 1px solid #ddd; background: #fff; padding: 10px; box-sizing: border-box; border-radius: 4px;">
@@ -593,10 +618,11 @@ def generate_report():
             <strong>Scientific Basis:</strong> This threshold matches the <strong>PRRI-6</strong> (pulse rate rises &gt;6 bpm) metric validated as a screening marker for sleep fragmentation. 
             Source: <a href="https://pubmed.ncbi.nlm.nih.gov/14607348/" target="_blank">Adachi et al., "Clinical significance of pulse rate rise during sleep..." (Sleep Medicine, 2003)</a>. 
             DOI: <a href="https://doi.org/10.1016/j.sleep.2003.06.003" target="_blank">10.1016/j.sleep.2003.06.003</a>.<br>
-            <strong>Metrics Breakdown:</strong>
+            <strong>Metrics Breakdown & Scoring Documentaton:</strong>
             <ul>
-                <li><strong>Score (0-100):</strong> A weighted composite score of Frequency (SI/h), Magnitude (TAB), Intensity (P90), and Pattern characteristics.</li>
-                <li><strong>Spike (PC) Total index/hr:</strong> Total events divided by total valid sleep hours. Indicates how often the nervous system is reacting.</li>
+                <li><strong>Score (0-100):</strong> A weighted composite severity score out of 100. It combines Frequency (0-30 pts, based on Spike Index * 0.6), Magnitude Burden (0-30 pts, based on TAB normalized), Spike Intensity (0-20 pts, based on 90th percentile peak jump), and Pattern factors (0-20 pts, penalizing extreme regularity or lack of vagal recovery).</li>
+                <li><strong>Spike (PC) Total index/hr:</strong> Filtered total events divided by total valid sleep hours. Uses advanced state machine (requires min peak delta &gt;=6, min rise rate 0.8bpm/sec, tracking baseline at P25). Indicates how often the nervous system is reacting to distinct stressors.</li>
+                <li><strong>PRRI-6/hr (raw):</strong> The simplistic Pulse Rate Rise Index matching Adachi algorithm strictly: purely calculates how many times HR rises by 6 bpm from a local trough to peak, ignoring state tracking or slow drift rejections. Shows higher numbers generally than the Spike Index.</li>
                 <li><strong>TAB:</strong> Total Autonomic Burden. The sum of the area-under-the-curve for all spikes, heavily reflecting spike duration and intensity.</li>
                 <li><strong>Mean ΔHR:</strong> The average heart rate jump (in bpm) across all spikes.</li>
                 <li><strong>Intensity (P90Δ):</strong> The 90th percentile peak jump. Shows the intensity of the worst 10% of your spikes.</li>
@@ -620,6 +646,7 @@ def generate_report():
                     <th>Mean ΔHR</th>
                     <th>Intensity (P90Δ)</th>
                     <th>Spike (PC) Total index/hr</th>
+                    <th>PRRI-6/hr (raw)</th>
                     <th>PC10/hr</th>
                     <th>PC15/hr</th>
                     <th>Events</th>
@@ -684,7 +711,7 @@ def generate_report():
         if idx == 0:
             display_date += " <span style='font-size: 14px; font-weight: bold; color: #d97706;'>(Click me!)</span>"
             
-        html.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:openChart(\'charts/{chart_fname}\');" style="text-decoration:none; color:#0366d6;">{display_date}</a></td>')
+        html.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:void(0);" onclick="openChart(\'charts/{chart_fname}\', this);" style="text-decoration:none; color:#0366d6;">{display_date}</a></td>')
         html.append(f'<td class="left-align"><span class="editable-label" contenteditable="true">{r["label"]}</span></td>')
         html.append(f'<td data-sort="{hrs_exact}">{hr_str}</td>')
         html.append(cell('score', r['score']))
@@ -692,9 +719,11 @@ def generate_report():
         html.append(cell('delta', r['mean_delta']))
         html.append(cell('p90', r.get('p90_delta', 0)))
         html.append(cell('si', r['si']))
+        html.append(cell('prri_index', r.get('prri_index', 0)))
         html.append(cell('pc10', r['pc10_per_hr']))
         html.append(cell('pc15', r['pc15_per_hr']))
         html.append(f'<td>{r["events"]}</td>')
+        html.append(f'<td>{r.get("prri_count", 0)}</td>')
         html.append(f'<td>{pc_split}</td>')
         html.append(cell('events_A_ph', r.get('events_A_ph', 0)))
         html.append(cell('events_B_ph', r.get('events_B_ph', 0)))
@@ -705,7 +734,18 @@ def generate_report():
         html.append(f'<td class="left-align mono" style="font-size:11px;">{fname}</td>')
         html.append("</tr>")
 
-    html.append("""</tbody></table></body></html>""")
+    html.append("""</tbody></table>
+        
+        <br><br>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #ddd; margin-bottom: 30px;">
+            <h2>Changelog (Stats & Algorithms)</h2>
+            <ul style="line-height: 1.6;">
+                <li><strong>Latest Update:</strong> Added generic PRRI-6 tracking alongside our custom state-machine Spike Index to allow comparison against raw literature methodologies. Expanded scoring and metrics documentation section.</li>
+                <li><strong>Previous:</strong> Added Experimental Major Spike algorithms (A, B, C) with varying refractory periods and magnitude thresholds to isolate profound awakenings.</li>
+                <li><strong>Previous:</strong> Shifted Spike Index baseline from a static pre-sleep value to an adaptive 5-minute moving 25th-percentile (P25) HR baseline, dramatically improving robustness against normal sleep stage transitions.</li>
+            </ul>
+        </div>
+    </body></html>""")
 
     data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
     out_file = os.path.join(data_dir, 'detector_results.html')

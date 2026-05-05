@@ -120,17 +120,26 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
         x_max = t_axis.iloc[-1] if hasattr(t_axis, 'iloc') else t_axis[-1]
         
     min_hr = np.nanmin(hr_plot) if not np.all(np.isnan(hr_plot)) else 40
-    y_min = max(30, min_hr - 2)
+    max_hr = np.nanmax(hr_plot) if not np.all(np.isnan(hr_plot)) else 100
+    y_min = max(30, min_hr - 5)
+    y_max = min(200, max_hr + 10)
 
     fig.update_layout(
-        title=f"HR Analysis - {os.path.basename(fpath)} (Score: {summary.severity_score:.1f})",
+        title=dict(
+            text=f"{os.path.basename(fpath)} (Score: {summary.severity_score:.1f})",
+            y=0.98,
+            x=0.02,
+            xanchor='left',
+            yanchor='top',
+            font=dict(size=14, color='rgba(0,0,0,0.7)', family='sans-serif')
+        ),
         xaxis_title="Time",
         xaxis=dict(range=[x_min, x_max]),
         yaxis_title="Heart Rate (bpm)",
-        yaxis=dict(range=[y_min, 140]),
+        yaxis=dict(range=[y_min, y_max]),
         dragmode="select",
         hovermode="x unified",
-        margin=dict(l=40, r=40, t=40, b=40)
+        margin=dict(l=40, r=40, t=10, b=10)
     )
 
     chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
@@ -163,9 +172,6 @@ def generate_session_chart(fpath, hr_smooth, baseline, valid, events, summary, c
     </head>
     <body>
         <div id="chart-container">
-            <div class="header-bar">
-                <h2>{fname}</h2>
-            </div>
             {chart_html}
         </div>
         <div id="sidebar">
@@ -415,7 +421,7 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
         params = PRESETS[Preset.SENSITIVE].copy()
         events = detect_spikes(hr_smooth, baseline, valid, params)
         
-        summary = compute_summary(events, valid, n)
+        summary = compute_summary(events, valid, n, hr_smooth=hr_smooth)
         
         if generate_chart and chart_dir:
             try:
@@ -483,6 +489,8 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None):
             'hours_exact': hrs,
             'events': len(events),
             'si': summary.spike_index,
+            'prri_index': round(summary.prri_index, 1),
+            'prri_count': summary.prri_count,
             'tab': round(summary.total_autonomic_burden, 1),
             'score': summary.severity_score,
             'mean_delta': round(np.mean(deltas), 1) if events else 0,

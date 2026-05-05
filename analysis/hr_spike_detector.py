@@ -200,6 +200,11 @@ class NightSummary:
     total_spikes: int
     spike_index: float              # events/hour
     
+    # Generic PRRI-6 for comparison
+    prri_count: int
+    prri_index: float
+
+    
     # Magnitude
     mean_delta_hr: float            # mean bpm rise
     median_delta_hr: float
@@ -580,12 +585,56 @@ def classify_spike(event: SpikeEvent) -> SpikeType:
     return SpikeType.UNCLASSIFIED
 
 
+def compute_prri(hr_smooth: np.ndarray, valid: np.ndarray, delta: float = 6.0) -> int:
+    """Basic PRRI calculation (Pulse Rate Rise Index).
+    Counts rises from a local nadir to a peak >= delta.
+    Requires at least a small drop to re-arm for the next event to avoid double counting.
+    """
+    if hr_smooth is None or len(hr_smooth) == 0:
+        return 0
+        
+    count = 0
+    state = 0 # 0=looking for rise
+    nadir = hr_smooth[0]
+    peak = hr_smooth[0]
+    
+    rearm_drop = delta / 2.0
+    
+    for i in range(1, len(hr_smooth)):
+        if not valid[i]:
+            continue
+            
+        hr = hr_smooth[i]
+        
+        if state == 0:
+            if hr < nadir:
+                nadir = hr
+                peak = hr
+            elif hr > peak:
+                peak = hr
+                
+            if peak - nadir >= delta:
+                count += 1
+                state = 1
+                peak = hr
+        elif state == 1:
+            if hr > peak:
+                peak = hr
+            if peak - hr >= rearm_drop:
+                state = 0
+                nadir = hr
+                peak = hr
+                
+    return count
+
+
+
 # ============================================================
 # STAGE 5: NIGHT SUMMARY
 # ============================================================
 
 def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
-                    total_seconds: int) -> NightSummary:
+                    total_seconds: int, hr_smooth: np.ndarray = None) -> NightSummary:
     """Compute all night-level metrics."""
     
     valid_seconds = int(np.sum(valid))
@@ -601,6 +650,7 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
             valid_hours=round(valid_hours, 2),
             quality_pct=round(quality * 100, 1),
             total_spikes=0, spike_index=0,
+            prri_count=0, prri_index=0,
             mean_delta_hr=0, median_delta_hr=0, p90_delta_hr=0, mean_delta_hr_pct=0,
             total_autonomic_burden=0, tab_normalized=0,
             median_duration=0, mean_duration=0,
@@ -610,6 +660,13 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
             severity_score=0, severity_label="normal"
         )
     
+    # Calculate PRRI-6
+    prri_count = 0
+    prri_index = 0.0
+    if hr_smooth is not None:
+        prri_count = compute_prri(hr_smooth, valid, 6.0)
+        prri_index = prri_count / valid_hours if valid_hours > 0 else 0
+        
     deltas = np.array([e.delta_hr for e in events])
     deltas_pct = np.array([e.delta_hr_pct for e in events])
     durations = np.array([e.total_duration for e in events])
@@ -709,6 +766,8 @@ def compute_summary(events: List[SpikeEvent], valid: np.ndarray,
         quality_pct=round(quality * 100, 1),
         total_spikes=n_events,
         spike_index=round(si, 1),
+        prri_count=prri_count,
+        prri_index=round(prri_index, 1),
         mean_delta_hr=round(mean_d, 1),
         median_delta_hr=round(median_d, 1),
         p90_delta_hr=round(p90_d, 1),
@@ -1055,7 +1114,8 @@ def main():
     print(f"Detected {len(events)} events")
     
     print("\n--- Stage 5: Computing summary ---")
-    summary = compute_summary(events, valid, len(hr_raw))
+    # Calculate metrics
+    summary = compute_summary(events, valid, len(hr_raw), hr_smooth=hr_smooth)
     
     # Print summary
     print("\n" + "=" * 60)
