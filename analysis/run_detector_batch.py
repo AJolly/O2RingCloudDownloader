@@ -578,19 +578,19 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None, trim_after
             'hours': round(hrs, 1),
             'hours_exact': hrs,
             'events': len(events),
-            'si': summary.spike_index,
-            'tmb': summary.tmb,
-            'prri_index': round(summary.prri_index, 1),
+            'si': round(summary.spike_index, 2),
+            'tmb': int(round(summary.tmb)),
+            'prri_index': int(round(summary.prri_index)),
             'prri_count': summary.prri_count,
-            'tab': round(summary.total_autonomic_burden, 1),
-            'tab10': round(summary.tab10, 1),
+            'tab': int(round(summary.total_autonomic_burden)),
+            'tab10': int(round(summary.tab10)),
             'score': summary.severity_score,
-            'p90_delta': round(np.percentile(deltas, 90), 1) if events else 0,
-            'pc10_per_hr': round(sum(1 for d in deltas if d >= 10)/hrs, 1) if events else 0,
-            'pc15_per_hr': round(sum(1 for d in deltas if d >= 15)/hrs, 1) if events else 0,
-            'pct_a': round(summary.pct_type_a, 1),
-            'pct_b': round(summary.pct_type_b, 1),
-            'pct_c': round(summary.pct_type_c, 1),
+            'p90_delta': int(round(np.percentile(deltas, 90))) if events else 0,
+            'pc10_per_hr': round(sum(1 for d in deltas if d >= 10)/hrs, 2) if events else 0,
+            'pc15_per_hr': round(sum(1 for d in deltas if d >= 15)/hrs, 2) if events else 0,
+            'pct_a': round(summary.pct_type_a, 2),
+            'pct_b': round(summary.pct_type_b, 2),
+            'pct_c': round(summary.pct_type_c, 2),
         }
         
         # Calculate major presets
@@ -598,10 +598,10 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None, trim_after
             p_params = PRESETS[pkey].copy()
             p_events = detect_spikes(hr_smooth, baseline, valid, p_params)
             res_dict[f'events_{pname}'] = len(p_events)
-            res_dict[f'events_{pname}_ph'] = round(len(p_events) / hrs, 1) if hrs > 0 else 0
+            res_dict[f'events_{pname}_ph'] = round(len(p_events) / hrs, 2) if hrs > 0 else 0
             
             p_aucs = [e.auc for e in p_events]
-            res_dict[f'tab_major_{pname.lower()}'] = round(float(np.sum(p_aucs)) / hrs, 1) if hrs > 0 else 0
+            res_dict[f'tab_major_{pname.lower()}'] = round(float(np.sum(p_aucs)) / hrs, 2) if hrs > 0 else 0
             
         # Calculate comparison presets
         for pname, pkey in [("standard", Preset.STANDARD), ("specific", Preset.SPECIFIC), ("clinical", Preset.CLINICAL)]:
@@ -609,16 +609,16 @@ def analyze_night(fpath, label, generate_chart=False, chart_dir=None, trim_after
             p_events = detect_spikes(hr_smooth, baseline, valid, p_params)
             p_summary = compute_summary(p_events, valid, n)
             res_dict[f'score_{pname}'] = round(p_summary.severity_score, 1)
-            res_dict[f'tab_{pname}'] = round(p_summary.total_autonomic_burden, 1)
+            res_dict[f'tab_{pname}'] = int(round(p_summary.total_autonomic_burden))
             events_dict[pname.capitalize()] = p_events
             
             # Derived metrics per-preset (for engine-switching dropdown)
             p_deltas = [e.delta_hr for e in p_events]
-            res_dict[f'si_{pname}'] = round(p_summary.spike_index, 1)
-            res_dict[f'p90_delta_{pname}'] = round(np.percentile(p_deltas, 90), 1) if p_events else 0
-            res_dict[f'pc10_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 10)/hrs, 1) if p_events else 0
-            res_dict[f'pc15_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 15)/hrs, 1) if p_events else 0
-            res_dict[f'tab10_{pname}'] = round(p_summary.tab10, 1)
+            res_dict[f'si_{pname}'] = round(p_summary.spike_index, 2)
+            res_dict[f'p90_delta_{pname}'] = int(round(np.percentile(p_deltas, 90))) if p_events else 0
+            res_dict[f'pc10_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 10)/hrs, 2) if p_events else 0
+            res_dict[f'pc15_per_hr_{pname}'] = round(sum(1 for d in p_deltas if d >= 15)/hrs, 2) if p_events else 0
+            res_dict[f'tab10_{pname}'] = int(round(p_summary.tab10))
             
         if generate_chart and chart_dir:
             try:

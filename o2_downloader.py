@@ -147,7 +147,101 @@ def sanitize_filename(name):
     name = name.replace('\n', ' ').replace('\r', '')
     return re.sub(r'[<>:"/\\|?*]', '_', name)
 
+def shorten_wake_tags(text):
+    def repl(match):
+        inner = match.group(1)
+        # Check leading space
+        leading_space = " " if inner.startswith(" ") else ""
+        parts = [p.strip() for p in inner.split(',')]
+        if len(parts) > 5:
+            shortened = f"{parts[0]}, {parts[1]}, {parts[2]}, ..., {parts[-2]}, {parts[-1]}"
+            return f"[Wake_{leading_space}{shortened}]"
+        return match.group(0)
+    
+    return re.sub(r'\[Wake_([^\]]+)\]', repl, text)
+
+def make_safe_filename(directory, filename, max_path_len=250):
+    # Shorten any long Wake_ tags in the filename first
+    filename = shorten_wake_tags(filename)
+    
+    abs_dir = os.path.abspath(directory)
+    # Target max filename length to ensure total path length <= max_path_len
+    # Also NTFS max filename length is 255
+    max_fn_len = min(255, max_path_len - len(abs_dir) - 1)
+    if max_fn_len < 80:
+        max_fn_len = 80
+        
+    if len(filename) <= max_fn_len:
+        return filename
+        
+    # We need to truncate the name part of the filename but preserve the extension
+    name, ext = os.path.splitext(filename)
+    allowed_name_len = max_fn_len - len(ext)
+    
+    if allowed_name_len <= 40:
+        return name[:allowed_name_len] + ext
+        
+    first_part_len = int(allowed_name_len * 0.6)
+    last_part_len = allowed_name_len - first_part_len - 3
+    
+    truncated_name = name[:first_part_len] + "..." + name[-last_part_len:]
+    return truncated_name + ext
+
+
+def clean_comment_for_filename(remark):
+    if not remark:
+        return ""
+    # Remove all square bracketed tags
+    cleaned = re.sub(r'\[.*?\]', '', remark)
+    # Replace multiple underscores or spaces with a single space/underscore
+    cleaned = cleaned.replace('_', ' ')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # Take at most 40 characters
+    if len(cleaned) > 40:
+        cleaned = cleaned[:37] + "..."
+        
+    return sanitize_filename(cleaned)
+
+def update_session_notes_file(output_dir, records):
+    notes_file = os.path.join(output_dir, "session_notes.json")
+    notes_data = {}
+    if os.path.exists(notes_file):
+        try:
+            with open(notes_file, 'r', encoding='utf-8') as f:
+                notes_data = json.load(f)
+        except Exception as e:
+            print(f"Error loading session_notes.json: {e}")
+            
+    updated = False
+    for r in records:
+        ts = r.get('measureTime')
+        remark = r.get('remark') or ""
+        dt_str = None
+        if ts:
+            try:
+                if isinstance(ts, (int, float)):
+                    dt_str = datetime.fromtimestamp(ts / 1000.0).strftime("%Y%m%d%H%M%S")
+                elif isinstance(ts, str):
+                    dt_str = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d%H%M%S")
+            except:
+                pass
+        if dt_str and remark:
+            if notes_data.get(dt_str) != remark:
+                notes_data[dt_str] = remark
+                updated = True
+                
+    if updated:
+        try:
+            with open(notes_file, 'w', encoding='utf-8') as f:
+                json.dump(notes_data, f, indent=2)
+            print(f"Updated session_notes.json with {len(notes_data)} entries.")
+        except Exception as e:
+            print(f"Error writing session_notes.json: {e}")
+
+
 def get_pc_app_credentials():
+
     if os.name != 'nt':
         return None, None
         
@@ -326,6 +420,56 @@ def main():
         print(f"Please provide valid credentials by running the script once on a PC with the app installed, or manually populate {config_path}")
         return
 
+    # Check for pending comment updates
+    sync_file_data = os.path.join(output_dir, 'cloud_comments_sync.json')
+    sync_file_main = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cloud_comments_sync.json')
+    
+    sync_file = None
+    if os.path.exists(sync_file_main):
+        sync_file = sync_file_main
+    elif os.path.exists(sync_file_data):
+        sync_file = sync_file_data
+
+    if sync_file:
+        try:
+            with open(sync_file, 'r', encoding='utf-8') as f:
+                sync_data = json.load(f)
+            
+            if sync_data:
+                print(f"Found {len(sync_data)} pending comment updates in {sync_file}. Processing...")
+                
+                # Make a backup
+                import shutil
+                backup_file = sync_file + f".bak.{int(time.time())}"
+                shutil.copy2(sync_file, backup_file)
+                print(f"Created backup of sync file at {backup_file}")
+                
+                failed_updates = {}
+                for ts, text in sync_data.items():
+                    print(f"Looking up API ID for timestamp {ts}...")
+                    session_id = find_session_by_timestamp(client, ts)
+                    if session_id:
+                        print(f"Updating remark for session {session_id} to '{text}'...")
+                        res = client.update_remark(int(session_id), text)
+                        if res and res.get('code') in (0, 200):
+                            print(f" -> Success for {ts}")
+                        else:
+                            print(f" -> Failed to update {ts}: {res}")
+                            failed_updates[ts] = text
+                    else:
+                        print(f" -> Could not find session {ts} on server.")
+                        failed_updates[ts] = text
+                        
+                if failed_updates:
+                    print(f"Saving {len(failed_updates)} failed updates back to {sync_file}")
+                    with open(sync_file, 'w', encoding='utf-8') as f:
+                        json.dump(failed_updates, f, indent=2)
+                else:
+                    os.remove(sync_file)
+                    print("Finished processing all pending comments successfully and removed sync file.")
+        except Exception as e:
+            print(f"Error processing pending comments in {sync_file}: {e}")
+
     if not os.path.exists(output_dir):
         try:
             os.makedirs(output_dir)
@@ -360,10 +504,19 @@ def main():
         return
 
     if args.remark:
-        session_id = int(args.remark[0])
+        target = args.remark[0]
         remark_text = args.remark[1]
+        session_id = target
+        
+        if len(target) >= 14 or not target.isdigit():
+            print(f"Looking up API ID for timestamp {target}...")
+            session_id = find_session_by_timestamp(client, target)
+            if not session_id:
+                print(f"Could not find session with timestamp {target} on the server.")
+                return
+                
         print(f"Updating remark for session {session_id} to '{remark_text}'...")
-        res = client.update_remark(session_id, remark_text)
+        res = client.update_remark(int(session_id), remark_text)
         if res and res.get('code') in (0, 200):
             print("Remark updated successfully.")
         return
@@ -414,6 +567,8 @@ def main():
             if (r.get('remark') and not old_r.get('remark')) or (r.get('isStar') and not old_r.get('isStar')):
                 records[old_idx] = r
 
+    update_session_notes_file(output_dir, records)
+
     for idx, record in enumerate(records, 1):
         file_url = record.get('originalFileUrl')
         record_id = record.get('id')
@@ -449,9 +604,9 @@ def main():
             print(f"[{idx}/{len(records)}] WARNING: Session {ignore_match} is in ignored_sessions.txt. Skipping download.")
             continue
             
-        # Construct Filename: "{start_time}[_FLAGGED][_REMARK].bin"
-        flag_str = "_FLAGGED" if is_star else ""
-        remark_str = f"_{sanitize_filename(remark)}" if remark else ""
+        # Construct Filename: "{start_time}[_CLEANED_REMARK].bin"
+        cleaned_remark = clean_comment_for_filename(remark)
+        remark_str = f"_{cleaned_remark}" if cleaned_remark else ""
         
         # Original filename suffix (usually .bin or .csv)
         ext = ".bin"
@@ -464,7 +619,8 @@ def main():
              if len(parts) > 1:
                  ext = '.' + parts[-1].split('?')[0] # remove query params if any
         
-        filename = f"{dt_str}{flag_str}{remark_str}{ext}"
+        raw_filename = f"{dt_str}{remark_str}{ext}"
+        filename = make_safe_filename(output_dir, raw_filename)
         local_path = os.path.join(output_dir, filename)
         
         if filename in merged_fragments:
@@ -490,19 +646,13 @@ def main():
         existing_files = [f for f in os.listdir(output_dir) if f.startswith(dt_str) and f.endswith(ext)]
         if existing_files:
             existing_file = existing_files[0]
-            existing_label = existing_file[len(dt_str):-len(ext)]
-            new_label = f"{flag_str}{remark_str}"
             
-            # Conflict resolution: combine existing label with new comment part (if not already present)
-            combined_label = existing_label
-            if new_label and new_label not in existing_label:
-                combined_label += new_label
-                
-            final_filename = f"{dt_str}{combined_label}{ext}"
+            # The target filename is the clean filename without tags
+            final_filename = filename
             final_local_path = os.path.join(output_dir, final_filename)
             
             if existing_file == final_filename:
-                # The local file already includes all labels
+                # The local file already matches the correct name
                 continue
                 
             print(f"[{idx}/{len(records)}] Label conflict/update. Renaming '{existing_file}' to '{final_filename}'...")
@@ -511,7 +661,6 @@ def main():
                 update_file_time(final_local_path)
             except Exception as e:
                 print(f"[{idx}/{len(records)}] Failed to rename: {e}. Downloading instead...")
-                filename = final_filename
                 local_path = final_local_path
             else:
                 continue

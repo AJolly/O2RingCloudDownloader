@@ -136,6 +136,8 @@ def main():
                 original_stem = original_stem[:-7]
                 
             out_name = vsu.generate_filename(original_stem, all_records[0]['time'], duration_s)
+            if len(out_name) > 240:
+                out_name = out_name[:150] + "..." + out_name[-87:]
             
             if duration_s < min_duration_s and min_duration_s > 0:
                 print(f"  [SKIP] {first_fp.name} -> {out_name} skipped < {min_duration_s//60}m ({duration_s/60:.1f} min)")
@@ -157,6 +159,8 @@ def main():
             
             original_stem = first_fp.stem
             out_name = vsu.generate_filename(original_stem, all_records[0]['time'], duration_s)
+            if len(out_name) > 240:
+                out_name = out_name[:150] + "..." + out_name[-87:]
             
             if duration_s < min_duration_s and min_duration_s > 0:
                 print(f"  [SKIP] Merge result -> {out_name} skipped < {min_duration_s//60}m ({duration_s/60:.1f} min)")

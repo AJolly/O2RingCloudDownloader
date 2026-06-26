@@ -68,6 +68,7 @@ def parse_trim_directive(label_text):
         return dt_mod.time(hour, minute)
     return None
 
+
 def generate_report():
     print("Collecting data...", flush=True)
     results = []
@@ -82,6 +83,17 @@ def generate_report():
             print(f"Loaded cache with {len(cache)} entries.", flush=True)
         except Exception as e:
             print(f"Failed to load cache: {e}", flush=True)
+            
+    # Load session notes from session_notes.json
+    session_notes = {}
+    notes_file = os.path.join(data_dir, 'session_notes.json')
+    if os.path.exists(notes_file):
+        try:
+            with open(notes_file, 'r', encoding='utf-8') as f:
+                session_notes = json.load(f)
+            print(f"Loaded {len(session_notes)} session notes from session_notes.json", flush=True)
+        except Exception as e:
+            print(f"Failed to load session_notes.json: {e}", flush=True)
     
     search_path = os.path.join(CSV_DIR, "*.csv")
     csv_files = glob.glob(search_path)
@@ -114,21 +126,32 @@ def generate_report():
             print(f"Skipping ignored session: {fname}", flush=True)
             continue
             
+        # Try to look up in session_notes.json first using the 14-digit timestamp
+        m_ts = re.match(r'^(\d{14})', fname)
+        notes_from_json = None
+        if m_ts:
+            ts_key = m_ts.group(1)
+            notes_from_json = session_notes.get(ts_key)
+            
         label = KNOWN_LABELS.get(fname, fname)
         trim_after_time = None
         if label == fname:
-            # Parse 20260217032620_326am_10h_23m.csv
-            m = re.match(r'^(\d{4})(\d{2})(\d{2})\d{6}_(.*)\.csv', fname)
-            if m:
-                raw_label = m.group(4).replace('_', ' ')
-                notes_part, time_part = parse_label_parts(raw_label)
-                # Only show time+duration if there are no user notes
-                if notes_part:
-                    label = notes_part
-                    # Check notes for trim directives
-                    trim_after_time = parse_trim_directive(notes_part)
-                else:
-                    label = time_part
+            if notes_from_json:
+                label = notes_from_json
+                trim_after_time = parse_trim_directive(notes_from_json)
+            else:
+                # Parse 20260217032620_326am_10h_23m.csv
+                m = re.match(r'^(\d{4})(\d{2})(\d{2})\d{6}_(.*)\.csv', fname)
+                if m:
+                    raw_label = m.group(4).replace('_', ' ')
+                    notes_part, time_part = parse_label_parts(raw_label)
+                    # Only show time+duration if there are no user notes
+                    if notes_part:
+                        label = notes_part
+                        # Check notes for trim directives
+                        trim_after_time = parse_trim_directive(notes_part)
+                    else:
+                        label = time_part
         else:
             # KNOWN_LABELS entry - also check for trim directives
             trim_after_time = parse_trim_directive(label)
@@ -150,6 +173,7 @@ def generate_report():
                 _, res = analyze_night(fpath, label, generate_chart=True, chart_dir=chart_dir, trim_after_time=trim_after_time)
                 if res:
                     res['filename'] = fname
+                    res['label'] = label
                     results.append(res)
                     cache[fname] = {'mtime': mtime, 'res': res}
                     cache_updated = True
@@ -220,7 +244,7 @@ def generate_report():
                 tr.parentNode.insertBefore(newTr, tr.nextSibling);
             }
             
-            const metricsFields = ['tmb', 'score', 'score_standard', 'score_specific', 'score_clinical', 'si', 'prri_index', 'tab', 'tab_standard', 'tab_specific', 'tab_clinical', 'tab10', 'tab_major_a', 'p90', 'pc10', 'pc15', 'events_A_ph', 'events_B_ph', 'events_C_ph'];
+            const metricsFields = ['wake_count', 'tmb', 'score', 'score_standard', 'score_specific', 'score_clinical', 'si', 'prri_index', 'tab', 'tab_standard', 'tab_specific', 'tab_clinical', 'tab10', 'tab_major_a', 'p90', 'pc10', 'pc15', 'events_A_ph', 'events_B_ph', 'events_C_ph'];
             
             // Engine-switchable columns: these show data from whichever preset is selected
             const engineSwitchableCells = ['si', 'p90', 'pc10', 'pc15', 'tab10'];
@@ -384,10 +408,49 @@ def generate_report():
                                 cell.style.backgroundColor = "";
                             } else {
                                 let val = parseFloat(cell.dataset.value);
-                                cell.style.backgroundColor = getColor(val, mins[m], maxs[m]);
+                                if (isNaN(val)) {
+                                    cell.style.backgroundColor = "";
+                                } else {
+                                    cell.style.backgroundColor = getColor(val, mins[m], maxs[m]);
+                                }
                             }
                         }
                     });
+
+                    // Background color for Date/Time (1) and Notes (2) cells
+                    let notesCell = row.cells[2];
+                    let dateCell = row.cells[1];
+                    if (notesCell && dateCell) {
+                        let text = "";
+                        let labelNode = notesCell.querySelector('.editable-label');
+                        let taNode = notesCell.querySelector('.comment-input');
+                        if (labelNode) {
+                            text = labelNode.innerText.toLowerCase();
+                        } else if (taNode) {
+                            text = taNode.value.toLowerCase();
+                        } else {
+                            text = notesCell.textContent.toLowerCase();
+                        }
+                        
+                        let isNap = row.dataset.isNap === "true";
+                        
+                        let normText = text.replace(/[-\s]/g, "");
+                        let hasControlOrNoCpap = text.includes("control") || text.includes("no cpap") || text.includes("no-cpap") || normText.includes("nocpap");
+                        
+                        if (text.includes("exclude")) {
+                            notesCell.style.backgroundColor = "#9ca3af";
+                            dateCell.style.backgroundColor = "#9ca3af";
+                        } else if (isNap) {
+                            notesCell.style.backgroundColor = "#e0f2fe";
+                            dateCell.style.backgroundColor = "#e0f2fe";
+                        } else if (hasControlOrNoCpap) {
+                            notesCell.style.backgroundColor = "#cbd5e1";
+                            dateCell.style.backgroundColor = "#cbd5e1";
+                        } else {
+                            notesCell.style.backgroundColor = "";
+                            dateCell.style.backgroundColor = "";
+                        }
+                    }
                 });
                 
                 // Keep the Chart updated
@@ -495,6 +558,9 @@ def generate_report():
                 let totalMajorA = 0, totalMajorB = 0, totalMajorC = 0;
                 let sumTab = 0, sumTabStandard = 0, sumTabSpecific = 0, sumTabClinical = 0, sumTab10 = 0, sumTmb = 0, sumTabMajorA = 0;
                 let sumScore = 0, sumScoreStandard = 0, sumScoreSpecific = 0, sumScoreClinical = 0, sumP90 = 0;
+                let sumWakeCount = 0;
+                let sumWakeHrs = 0;
+                let hasAnyWakeData = false;
                 // Per-engine derived metric accumulators
                 let sumSiByEngine = {sensitive:0, standard:0, specific:0, clinical:0};
                 let sumP90ByEngine = {sensitive:0, standard:0, specific:0, clinical:0};
@@ -504,8 +570,18 @@ def generate_report():
                 let sumTab10ByEngine = {sensitive:0, standard:0, specific:0, clinical:0};
                 let filenames = [], labels = [];
 
+                let minStartTs = Infinity;
+                let maxEndTs = -Infinity;
                 rows.forEach(row => {
-                    let hrs = parseFloat(row.cells[3].dataset.sort) || 0;
+                    let sCell = row.cells[1];
+                    let startTs = parseFloat(sCell.dataset.startTs);
+                    let hrs = parseFloat(row.cells[4].dataset.sort) || 0;
+                    if (!isNaN(startTs)) {
+                        let endTs = startTs + (hrs * 3600 * 1000);
+                        if (startTs < minStartTs) minStartTs = startTs;
+                        if (endTs > maxEndTs) maxEndTs = endTs;
+                    }
+                    
                     totalHrs += hrs;
                     
                     let evts = (parseFloat(row.querySelector('.cell-si')?.dataset?.value) || 0) * hrs;
@@ -552,6 +628,13 @@ def generate_report():
                     sumP90 += (parseFloat(row.querySelector('.cell-p90')?.dataset?.value) || 0) * evts;
                     totalPrriCount += (parseFloat(row.querySelector('.cell-prri_index')?.dataset?.value) || 0) * hrs;
                     
+                    let wakeVal = parseFloat(row.querySelector('.cell-wake_count')?.dataset?.value);
+                    if (!isNaN(wakeVal)) {
+                        sumWakeCount += wakeVal * hrs;
+                        sumWakeHrs += hrs;
+                        hasAnyWakeData = true;
+                    }
+                    
                     filenames.push(row.cells[row.cells.length - 1]?.innerText?.trim() || '');
                     let labelEl = row.querySelector('.editable-label');
                     labels.push(labelEl ? labelEl.innerText : '');
@@ -559,9 +642,26 @@ def generate_report():
                     // Unselect and hide
                     row.classList.remove('selected-row');
                     row.style.display = 'none';
+                    row.dataset.hiddenByMerge = "true";
                 });
 
                 if (totalHrs === 0) return;
+
+                let mergedDate = "Merged Date";
+                if (minStartTs !== Infinity) {
+                    let dS = new Date(minStartTs);
+                    let dE = new Date(maxEndTs);
+                    let dP = new Date(minStartTs - 24*3600*1000);
+                    let fmt = (d) => {
+                        let h = d.getHours();
+                        let m = d.getMinutes();
+                        let a = h >= 12 ? 'pm' : 'am';
+                        h = h % 12 || 12;
+                        return h + ':' + m.toString().padStart(2, '0') + a;
+                    };
+                    let dPart = (dP.getMonth()+1) + '/' + dP.getDate() + '-' + (dS.getMonth()+1) + '/' + dS.getDate();
+                    mergedDate = `<b>${dPart} ${fmt(dS)} - ${fmt(dE)}</b>`;
+                }
 
                 let newTab = sumTab / totalHrs;
                 let newTabStandard = sumTabStandard / totalHrs;
@@ -588,11 +688,11 @@ def generate_report():
                 // Per-engine derived values
                 let engSi = {}, engP90 = {}, engPc10 = {}, engPc15 = {}, engTab10 = {};
                 ['sensitive','standard','specific','clinical'].forEach(eng => {
-                    engSi[eng] = (sumSiByEngine[eng] / totalHrs).toFixed(1);
-                    engP90[eng] = sumEvtsByEngine[eng] > 0 ? (sumP90ByEngine[eng] / sumEvtsByEngine[eng]).toFixed(1) : '0.0';
-                    engPc10[eng] = (sumPc10ByEngine[eng] / totalHrs).toFixed(1);
-                    engPc15[eng] = (sumPc15ByEngine[eng] / totalHrs).toFixed(1);
-                    engTab10[eng] = (sumTab10ByEngine[eng] / totalHrs).toFixed(1);
+                    engSi[eng] = (sumSiByEngine[eng] / totalHrs).toFixed(2);
+                    engP90[eng] = sumEvtsByEngine[eng] > 0 ? (sumP90ByEngine[eng] / sumEvtsByEngine[eng]).toFixed(0) : '0';
+                    engPc10[eng] = (sumPc10ByEngine[eng] / totalHrs).toFixed(2);
+                    engPc15[eng] = (sumPc15ByEngine[eng] / totalHrs).toFixed(2);
+                    engTab10[eng] = (sumTab10ByEngine[eng] / totalHrs).toFixed(0);
                 });
 
                 let h = Math.floor(totalHrs);
@@ -600,40 +700,57 @@ def generate_report():
                 if (m === 60) { h++; m=0; }
                 let hrStr = `${h}h ${m.toString().padStart(2, '0')}m`;
 
-                let earliestRow = rows[rows.length - 1];
-                let mergedDate = earliestRow ? earliestRow.cells[1].innerHTML : "Merged Date";
                 
                 filenames.reverse();
                 labels.reverse();
 
+                let isMergedNap = false;
+                if (minStartTs !== Infinity) {
+                    let dS = new Date(minStartTs);
+                    let hour = dS.getHours();
+                    if (hour >= 9 && hour < 21) {
+                        isMergedNap = true;
+                    }
+                }
+
+                let mergedWakeCountVal = "";
+                let mergedWakeCountDisplay = "";
+                if (hasAnyWakeData && sumWakeHrs > 0) {
+                    let avgWakes = sumWakeCount / sumWakeHrs;
+                    mergedWakeCountVal = avgWakes.toFixed(4);
+                    mergedWakeCountDisplay = avgWakes.toFixed(2);
+                }
+
                 let tr = document.createElement('tr');
                 tr.dataset.filename = filenames.join(' + ');
                 tr.dataset.isMerged = "true";
+                tr.dataset.isNap = isMergedNap ? "true" : "false";
 
                 tr.innerHTML = `
                     <td><input type="checkbox" class="row-checkbox" checked></td>
-                    <td class="left-align" style="white-space: nowrap;">${mergedDate}</td>
+                    <td class="left-align" style="white-space: nowrap;" data-start-ts="${minStartTs}" data-sort="${minStartTs}">${mergedDate}</td>
                     <td class="left-align"><span class="editable-label" contenteditable="true">Merged: ${labels.join(' + ')}</span></td>
+                    <td class="cell-wake_count" data-value="${mergedWakeCountVal}">${mergedWakeCountDisplay}</td>
                     <td data-sort="${totalHrs}">${hrStr}</td>
-                    <td class="cell-tmb" data-value="${newTmb.toFixed(1)}">${newTmb.toFixed(1)}</td>
+                    <td class="cell-tmb" data-value="${newTmb.toFixed(0)}">${newTmb.toFixed(0)}</td>
                     <td class="cell-score" data-value="${newScore.toFixed(1)}">${newScore.toFixed(1)}</td>
                     <td class="cell-score_standard" data-value="${newScoreStandard.toFixed(1)}">${newScoreStandard.toFixed(1)}</td>
                     <td class="cell-score_specific" data-value="${newScoreSpecific.toFixed(1)}">${newScoreSpecific.toFixed(1)}</td>
                     <td class="cell-score_clinical" data-value="${newScoreClinical.toFixed(1)}">${newScoreClinical.toFixed(1)}</td>
-                    <td class="cell-tab" data-value="${newTab.toFixed(1)}">${newTab.toFixed(1)}</td>
-                    <td class="cell-tab_standard" data-value="${newTabStandard.toFixed(1)}">${newTabStandard.toFixed(1)}</td>
-                    <td class="cell-tab_specific" data-value="${newTabSpecific.toFixed(1)}">${newTabSpecific.toFixed(1)}</td>
-                    <td class="cell-tab_clinical" data-value="${newTabClinical.toFixed(1)}">${newTabClinical.toFixed(1)}</td>
+                    <td class="cell-tab" data-value="${newTab.toFixed(0)}">${newTab.toFixed(0)}</td>
+                    <td class="cell-tab_standard" data-value="${newTabStandard.toFixed(0)}">${newTabStandard.toFixed(0)}</td>
+                    <td class="cell-tab_specific" data-value="${newTabSpecific.toFixed(0)}">${newTabSpecific.toFixed(0)}</td>
+                    <td class="cell-tab_clinical" data-value="${newTabClinical.toFixed(0)}">${newTabClinical.toFixed(0)}</td>
                     <td class="cell-tab10" data-value="${engTab10[currentEngine]}" data-value-sensitive="${engTab10.sensitive}" data-value-standard="${engTab10.standard}" data-value-specific="${engTab10.specific}" data-value-clinical="${engTab10.clinical}">${engTab10[currentEngine]}</td>
-                    <td class="cell-tab_major_a" data-value="${newTabMajorA.toFixed(1)}">${newTabMajorA.toFixed(1)}</td>
+                    <td class="cell-tab_major_a" data-value="${newTabMajorA.toFixed(2)}">${newTabMajorA.toFixed(2)}</td>
                     <td class="cell-p90" data-value="${engP90[currentEngine]}" data-value-sensitive="${engP90.sensitive}" data-value-standard="${engP90.standard}" data-value-specific="${engP90.specific}" data-value-clinical="${engP90.clinical}">${engP90[currentEngine]}</td>
                     <td class="cell-si" data-value="${engSi[currentEngine]}" data-value-sensitive="${engSi.sensitive}" data-value-standard="${engSi.standard}" data-value-specific="${engSi.specific}" data-value-clinical="${engSi.clinical}">${engSi[currentEngine]}</td>
-                    <td class="cell-prri_index" data-value="${newPrri.toFixed(1)}">${newPrri.toFixed(1)}</td>
+                    <td class="cell-prri_index" data-value="${newPrri.toFixed(0)}">${newPrri.toFixed(0)}</td>
                     <td class="cell-pc10" data-value="${engPc10[currentEngine]}" data-value-sensitive="${engPc10.sensitive}" data-value-standard="${engPc10.standard}" data-value-specific="${engPc10.specific}" data-value-clinical="${engPc10.clinical}">${engPc10[currentEngine]}</td>
                     <td class="cell-pc15" data-value="${engPc15[currentEngine]}" data-value-sensitive="${engPc15.sensitive}" data-value-standard="${engPc15.standard}" data-value-specific="${engPc15.specific}" data-value-clinical="${engPc15.clinical}">${engPc15[currentEngine]}</td>
-                    <td class="cell-events_A_ph" data-value="${newMajorAph.toFixed(1)}">${newMajorAph.toFixed(1)}</td>
-                    <td class="cell-events_B_ph" data-value="${newMajorBph.toFixed(1)}">${newMajorBph.toFixed(1)}</td>
-                    <td class="cell-events_C_ph" data-value="${newMajorCph.toFixed(1)}">${newMajorCph.toFixed(1)}</td>
+                    <td class="cell-events_A_ph" data-value="${newMajorAph.toFixed(2)}">${newMajorAph.toFixed(2)}</td>
+                    <td class="cell-events_B_ph" data-value="${newMajorBph.toFixed(2)}">${newMajorBph.toFixed(2)}</td>
+                    <td class="cell-events_C_ph" data-value="${newMajorCph.toFixed(2)}">${newMajorCph.toFixed(2)}</td>
                     <td class="left-align mono" style="font-size:11px;" title="${filenames.join('\\n')}">
                         Merged (${filenames.length} sessions)
                         <button class="unmerge-btn" style="margin-left: 5px; padding: 2px 4px; font-size: 9px; cursor: pointer;">Unmerge</button>
@@ -655,7 +772,10 @@ def generate_report():
                     if (confirm("Are you sure you want to unmerge these sessions?")) {
                         tr.remove();
                         rows.forEach(r => {
-                            r.style.display = '';
+                            delete r.dataset.hiddenByMerge;
+                            if (typeof napsHidden === 'undefined' || !napsHidden || r.dataset.isNap !== "true") {
+                                r.style.display = '';
+                            }
                         });
                         updateColors();
                         saveData();
@@ -712,7 +832,12 @@ def generate_report():
                     let allRows = Array.from(document.querySelectorAll('tbody tr'));
                     filenames.forEach(fname => {
                         let origRow = allRows.find(r => r.dataset.filename === fname && r !== mergedRow);
-                        if (origRow) origRow.style.display = '';
+                        if (origRow) {
+                            delete origRow.dataset.hiddenByMerge;
+                            if (typeof napsHidden === 'undefined' || !napsHidden || origRow.dataset.isNap !== "true") {
+                                origRow.style.display = '';
+                            }
+                        }
                     });
                     mergedRow.remove();
                 });
@@ -778,6 +903,59 @@ def generate_report():
                 document.getElementById('remergeBtn').style.display = 'none';
             }
 
+            let napsHidden = false;
+            function toggleHideNaps() {
+                napsHidden = !napsHidden;
+                let btn = document.getElementById('hideNapsBtn');
+                if (btn) {
+                    btn.textContent = napsHidden ? "Show Naps" : "Hide Naps";
+                    btn.style.backgroundColor = napsHidden ? "#475569" : "#64748b";
+                }
+                
+                document.querySelectorAll('tbody tr').forEach(row => {
+                    if (row.dataset.isNap === "true") {
+                        if (row.dataset.hiddenByMerge === "true") return;
+                        
+                        if (napsHidden) {
+                            row.style.display = 'none';
+                            let nextTr = row.nextElementSibling;
+                            if (nextTr && nextTr.classList.contains('inline-chart-row')) {
+                                nextTr.remove();
+                            }
+                        } else {
+                            row.style.display = '';
+                        }
+                    }
+                });
+                
+                updateColors();
+                updateMergeButtonState();
+            }
+
+            function toggleNapsCheckboxes() {
+                let napRows = Array.from(document.querySelectorAll('tbody tr')).filter(row => {
+                    return row.dataset.isNap === "true" && row.style.display !== 'none';
+                });
+                if (napRows.length === 0) return;
+                
+                let anyChecked = napRows.some(row => {
+                    let cb = row.querySelector('.row-checkbox');
+                    return cb && cb.checked;
+                });
+                
+                let targetChecked = !anyChecked;
+                
+                napRows.forEach(row => {
+                    let cb = row.querySelector('.row-checkbox');
+                    if (cb) {
+                        cb.checked = targetChecked;
+                    }
+                });
+                
+                updateColors();
+                saveData();
+            }
+
             let trendChart = null;
             const chartMetrics = [
                 { id: 'score', label: 'Score (Sens)', color: '#e6194b' },
@@ -820,6 +998,10 @@ def generate_report():
                     // Try to parse Date from anchor or just text
                     let dateCell = r.cells[1];
                     let dateStr = dateCell.innerText.trim();
+                    // Keep chart labels concise
+                    if (dateStr.includes(" - ")) {
+                        dateStr = dateStr.split(" - ")[0];
+                    }
                     labels.push(dateStr);
                     
                     chartMetrics.forEach((m, idx) => {
@@ -1018,6 +1200,9 @@ def generate_report():
             <button id="unmergeAllBtn" onclick="unmergeAll()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #ff9800; color: white; border: none; border-radius: 4px; margin-left: 8px;">Unmerge All Sessions</button>
             <button id="mergeByDayBtn" onclick="mergeByDay()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #9c27b0; color: white; border: none; border-radius: 4px; margin-left: 8px;">Auto-Merge by Day</button>
             <button id="remergeBtn" onclick="remergeAll()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #4caf50; color: white; border: none; border-radius: 4px; margin-left: 8px; display: none;">Restore Original Merges</button>
+            <button id="hideNapsBtn" onclick="toggleHideNaps()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #64748b; color: white; border: none; border-radius: 4px; margin-left: 8px;">Hide Naps</button>
+            <button id="toggleNapsBtn" onclick="toggleNapsCheckboxes()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #0284c7; color: white; border: none; border-radius: 4px; margin-left: 8px;">Check/Uncheck All Naps</button>
+            <a href="comment_update.html" target="_blank" style="display: inline-block; padding: 6px 12px; font-weight: bold; text-decoration: none; background-color: #607d8b; color: white; border-radius: 4px; margin-left: 15px;">Open Cloud Comment Utility</a>
           </p>
         </div>
         <table class="sortable">
@@ -1026,6 +1211,7 @@ def generate_report():
                     <th class="sorttable_nosort">Inc</th>
                     <th class="left-align" style="white-space: nowrap;">Date / Time</th>
                     <th class="left-align">Notes</th>
+                    <th title="Wakes per Hour">Wakes/hr</th>
                     <th>Length</th>
                     <th title="Total Motion Burden">TMB</th>
                     <th title="Sensitive Engine" class="col-score">Score (Sens)</th>
@@ -1069,29 +1255,94 @@ def generate_report():
         
         # Extract date string from filename using datetime
         fname = r['filename']
-        date_str = ""
-        m_date = re.match(r'^(\d{14})_', fname)
+        date_str = "Unknown"
+        start_ts = 0
+        m_date = re.match(r'^(\d{14})', fname)
         if m_date:
             try:
-                dt = datetime.datetime.strptime(m_date.group(1), "%Y%m%d%H%M%S")
-                prev_dt = dt - datetime.timedelta(days=1)
-                time_str = dt.strftime("%I:%M%p").lstrip("0").lower()
-                date_str = f"{prev_dt.month}/{prev_dt.day}-{dt.month}/{dt.day} {time_str}"
+                dt_start = datetime.datetime.strptime(m_date.group(1), "%Y%m%d%H%M%S")
+                hrs_exact = r.get('hours_exact', r['hours'])
+                dt_end = dt_start + datetime.timedelta(hours=hrs_exact)
+                
+                prev_dt = dt_start - datetime.timedelta(days=1)
+                start_time_str = dt_start.strftime("%I:%M%p").lstrip("0").lower()
+                end_time_str = dt_end.strftime("%I:%M%p").lstrip("0").lower()
+                
+                date_str = f"{prev_dt.month}/{prev_dt.day}-{dt_start.month}/{dt_start.day} {start_time_str} - {end_time_str}"
+                start_ts = dt_start.timestamp() * 1000
             except:
                 pass
 
-        if not date_str:
-            # fallback
-            m_date = re.match(r'^(\d{4})(\d{2})(\d{2})\d{6}_(.*)\.csv', fname)
-            if m_date:
-                date_str = f"{m_date.group(1)}-{m_date.group(2)}-{m_date.group(3)}"
-                time_part = m_date.group(4).split('_')[0] if '_' in m_date.group(4) else m_date.group(4)
-                date_str += f" ({time_part})"
-
         r['date'] = date_str
 
-        report_parts.append(f'<tr data-filename="{html.escape(fname, quote=True)}">')
-        report_parts.append(f'<td><input type="checkbox" class="row-checkbox" checked></td>')
+        # Extract raw API comment from session_notes.json or filename
+        raw_comment = ""
+        m_ts = re.match(r'^(\d{14})', fname)
+        notes_from_json = None
+        if m_ts:
+            ts_key = m_ts.group(1)
+            notes_from_json = session_notes.get(ts_key)
+            
+        if notes_from_json:
+            raw_comment = notes_from_json
+        else:
+            m_name = re.match(r'^\d{14}_(.*)\.csv', fname)
+            if m_name:
+                raw_label = m_name.group(1).replace('_', ' ')
+                notes_part, _ = parse_label_parts(raw_label)
+                raw_comment = notes_part.strip()
+            
+        stored_note = KNOWN_LABELS.get(fname, "")
+        best_comment = stored_note if stored_note else raw_comment
+
+        # Extract wake count from r['label']
+        wake_match = re.search(r'\[WakeCount[_\s:]*(\d+)\]', r.get('label', ''), re.IGNORECASE)
+        if wake_match:
+            wake_count = int(wake_match.group(1))
+            wake_count_hr = wake_count / hrs_exact
+            wake_display = f"{wake_count_hr:.2f}"
+            wake_data_val = f"{wake_count_hr:.4f}"
+            display_label = re.sub(r'\[WakeCount[_\s:]*(\d+)\]', '', r.get('label', ''), flags=re.IGNORECASE).strip()
+        else:
+            wake_count_hr = None
+            wake_display = ""
+            wake_data_val = ""
+            display_label = r.get('label', '')
+        
+        r['wake_count'] = wake_count_hr
+
+        # Check if the notes include control/no cpap or exclude
+        has_exclude = "exclude" in display_label.lower()
+        
+        # Normalize note for robust control/no cpap check
+        norm_label = display_label.lower().replace("-", "").replace(" ", "")
+        has_control_or_no_cpap = any(x in display_label.lower() for x in ["control", "no cpap", "no-cpap"]) or "nocpap" in norm_label
+
+        # Determine if it's a nap (starts after 9am and before 9pm)
+        is_nap = False
+        if m_date:
+            try:
+                dt_start = datetime.datetime.strptime(m_date.group(1), "%Y%m%d%H%M%S")
+                if 9 <= dt_start.hour < 21:
+                    is_nap = True
+            except:
+                pass
+
+        # Decide background color and checkbox checked state
+        # Priority: exclude (dark grey) > nap (light blue) > control (slate grey)
+        bg_style = ""
+        if has_exclude:
+            bg_style = "background-color: #9ca3af;"
+        elif is_nap:
+            bg_style = "background-color: #e0f2fe;"
+        elif has_control_or_no_cpap:
+            bg_style = "background-color: #cbd5e1;"
+
+        checkbox_checked = ' checked' if not has_exclude else ''
+
+        tr_attrs = f'data-filename="{html.escape(fname, quote=True)}" data-raw-comment="{html.escape(raw_comment, quote=True)}" data-best-comment="{html.escape(best_comment, quote=True)}" data-is-nap="{"true" if is_nap else "false"}"'
+        report_parts.append(f'<tr {tr_attrs}>')
+        report_parts.append(f'<td><input type="checkbox" class="row-checkbox"{checkbox_checked}></td>')
         chart_fname = fname.replace('.csv', '_chart.html')
         
         display_date = f"<b>{date_str}</b>"
@@ -1099,8 +1350,13 @@ def generate_report():
             display_date += " <span style='font-size: 14px; font-weight: bold; color: #d97706;'>(Click me!)</span>"
             
         chart_fname_js = chart_fname.replace("'", "\\'")
-        report_parts.append(f'<td class="left-align" style="white-space: nowrap;"><a href="javascript:void(0);" onclick="openChart(\'charts/{chart_fname_js}\', this);" style="text-decoration:none; color:#0366d6;">{display_date}</a></td>')
-        report_parts.append(f'<td class="left-align"><span class="editable-label" contenteditable="true">{html.escape(r["label"])}</span></td>')
+        
+        date_style_attr = f'style="white-space: nowrap; {bg_style}"' if bg_style else 'style="white-space: nowrap;"'
+        notes_style_attr = f' style="{bg_style}"' if bg_style else ''
+
+        report_parts.append(f'<td class="left-align" {date_style_attr} data-start-ts="{start_ts}" data-sort="{start_ts}"><a href="javascript:void(0);" onclick="openChart(\'charts/{chart_fname_js}\', this);" style="text-decoration:none; color:#0366d6;">{display_date}</a></td>')
+        report_parts.append(f'<td class="left-align"{notes_style_attr}><span class="editable-label" contenteditable="true">{html.escape(display_label)}</span></td>')
+        report_parts.append(cell('wake_count', wake_data_val, display=wake_display))
         report_parts.append(f'<td data-sort="{hrs_exact}">{hr_str}</td>')
         report_parts.append(cell('tmb', r.get('tmb', 0)))
         report_parts.append(cell('score', r['score']))
@@ -1154,9 +1410,158 @@ def generate_report():
     data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
     out_file = os.path.join(data_dir, 'detector_results.html')
     try:
+        main_html_str = "\n".join(report_parts)
         with open(out_file, 'w', encoding='utf-8') as f:
-            f.write("\n".join(report_parts))
+            f.write(main_html_str)
         print(f"HTML Report generated: {out_file}", flush=True)
+        
+        # Generate Comment Update variant
+        comment_html_str = main_html_str.replace("<title>HR Spike Detector Results</title>", "<title>Comment Update Utility</title>")
+        comment_html_str = comment_html_str.replace("<h1>HR Spike Detection Results</h1>", "<h1>Cloud Comment Update Utility</h1>")
+        
+        export_btn = '''
+        <p>
+            <button onclick="exportCommentsSync()" style="padding: 6px 12px; font-weight: bold; cursor: pointer; background-color: #28a745; color: white; border: none; border-radius: 4px;">Export Comments Sync File (JSON)</button>
+            <span style="font-size: 12px; margin-left: 10px;">(Saves cloud_comments_sync.json. Move it to the main o2downloader folder for auto-sync)</span>
+        </p>
+        '''
+        comment_html_str = re.sub(r'<p>\s*<button id="mergeBtn".*?</p>', export_btn, comment_html_str, flags=re.DOTALL)
+        
+        # Disable auto-loading of merged rows in the comment utility
+        comment_html_str = re.sub(r'loadData\(\);', '', comment_html_str)
+        
+        script_inject = '''
+        <script>
+            // Make Notes column wider and hide Filename column
+            let filenameColIdx = -1;
+            document.querySelectorAll('thead th').forEach((th, idx) => {
+                if (th.innerText.trim() === "Notes") {
+                    th.style.minWidth = "600px";
+                    th.style.width = "40%";
+                } else if (th.innerText.trim() === "Filename") {
+                    th.style.display = "none";
+                    filenameColIdx = idx;
+                }
+                        let currentDay = "";
+            let colorToggle = false;
+
+            let savedComments = {};
+            try {
+                let saved = localStorage.getItem('cloudCommentsV1');
+                if (saved) savedComments = JSON.parse(saved);
+            } catch(e) {}
+
+            document.querySelectorAll('tbody tr').forEach(row => {
+                if (filenameColIdx !== -1) {
+                    let tds = row.querySelectorAll('td');
+                    if (tds.length > filenameColIdx) {
+                        tds[filenameColIdx].style.display = "none";
+                    }
+                }
+                
+                // Group by day for row shading
+                if (row.cells.length > 1 && row.style.display !== 'none') {
+                    let dateText = row.cells[1].textContent.trim();
+                    let dayGroup = dateText.split(/\\s+/)[0];
+                    if (dayGroup !== currentDay) {
+                        currentDay = dayGroup;
+                        colorToggle = !colorToggle;
+                    }
+                    row.style.backgroundColor = colorToggle ? "#eaf2fb" : "#ffffff";
+                }
+                
+                let span = row.querySelector('.editable-label');
+                if (span) {
+                    let fname = row.dataset.filename;
+                    let m_date = fname ? fname.match(/^(\\d{14})_/) : null;
+                    let ts = m_date ? m_date[1] : null;
+
+                    let td = span.parentElement;
+                    let val = row.dataset.bestComment || "";
+                    if (ts && savedComments[ts] !== undefined) {
+                        val = savedComments[ts];
+                    }
+                    
+                    td.innerHTML = `<textarea class="comment-input" oninput="updateCharCount(this); saveCloudComments(); updateColors();" style="width: 100%; min-width: 400px; height: 80px; resize: vertical; font-family: inherit; font-size: 13px; box-sizing: border-box; background-color: inherit;">${val}</textarea><div class="char-count" style="font-size: 11px; color: #666; text-align: right;">${val.length} / 2000</div>`;
+                }
+            });
+
+            // Run color shading updates after textareas are constructed
+            updateColors();
+
+            function saveCloudComments() {
+                let data = {};
+                document.querySelectorAll('tbody tr').forEach(row => {
+                    let fname = row.dataset.filename;
+                    let m_date = fname ? fname.match(/^(\\d{14})_/) : null;
+                    if (!m_date) return;
+                    let ts = m_date[1];
+                    let ta = row.querySelector('.comment-input');
+                    if (ta) {
+                        let newText = ta.value.trim();
+                        let oldText = row.dataset.bestComment || "";
+                        if (newText !== oldText) {
+                            data[ts] = newText;
+                        }
+                        let cb = row.querySelector('.row-checkbox');
+                        if (cb && newText.toLowerCase().includes("exclude") && !oldText.toLowerCase().includes("exclude")) {
+                            cb.checked = false;
+                        }
+                    }
+                });
+                localStorage.setItem('cloudCommentsV1', JSON.stringify(data));
+            }
+
+            function updateCharCount(el) {
+                let len = el.value.length;
+                let counter = el.nextElementSibling;
+                counter.innerText = len + " / 2000";
+                if (len > 2000) counter.style.color = "red";
+                else counter.style.color = "#666";
+            }
+
+            function exportCommentsSync() {
+                let data = {};
+                let count = 0;
+                document.querySelectorAll('tbody tr').forEach(row => {
+                    if (row.style.display === 'none') return;
+                    let fname = row.dataset.filename;
+                    if (!fname) return;
+                    let m_date = fname.match(/^(\\d{14})_/);
+                    if (!m_date) return;
+                    let ts = m_date[1];
+                    
+                    let ta = row.querySelector('.comment-input');
+                    if (ta) {
+                        let newText = ta.value.trim();
+                        let oldText = row.dataset.bestComment || "";
+                        if (newText !== oldText) {
+                            data[ts] = newText;
+                            count++;
+                        }
+                    }
+                });
+                if (count === 0) {
+                    alert("No comments changed relative to the API raw comments!");
+                    return;
+                }
+                let blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+                let a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = "cloud_comments_sync.json";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        </script>
+        </body></html>
+        '''
+        comment_html_str = comment_html_str.replace("</body></html>", script_inject)
+        
+        comment_out_file = os.path.join(data_dir, 'comment_update.html')
+        with open(comment_out_file, 'w', encoding='utf-8') as f:
+            f.write(comment_html_str)
+        print(f"Comment Update Report generated: {comment_out_file}", flush=True)
         
         # Save CSV copy
         import csv
